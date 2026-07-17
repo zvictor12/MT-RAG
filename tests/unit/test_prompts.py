@@ -2,8 +2,11 @@ import json
 import unittest
 
 from mtrag.llm.prompts import (
+    DEFAULT_GENERATOR_PROMPT,
+    DEFAULT_REWRITE_PROMPT,
     GENERATOR_PROMPT_VERSION,
     REWRITE_PROMPT_VERSION,
+    PromptTemplate,
     build_generator_messages,
     build_rewrite_messages,
 )
@@ -55,6 +58,25 @@ class PromptTests(unittest.TestCase):
     def test_prompt_versions_are_explicit_cache_keys(self) -> None:
         self.assertEqual(REWRITE_PROMPT_VERSION, "qwen-rewrite-v2")
         self.assertEqual(GENERATOR_PROMPT_VERSION, "qwen-grounded-generation-v1")
+        self.assertEqual(
+            DEFAULT_REWRITE_PROMPT.sha256,
+            "2589d034dacd2be4783c3826f0f9c62ddc94ed6d935532088073c73794523e18",
+        )
+        self.assertEqual(
+            DEFAULT_GENERATOR_PROMPT.sha256,
+            "ca5cb7ebeb5119d43672e0a87935ef1096449d1eda5e6645ef0d176c832d31c0",
+        )
+
+    def test_custom_prompt_replaces_only_the_system_message(self) -> None:
+        prompt = PromptTemplate("Rewrite without inventing facts.")
+
+        messages = build_rewrite_messages(sample_task(), prompt=prompt)
+
+        self.assertEqual(messages[0]["content"], prompt.text)
+        self.assertEqual(
+            json.loads(messages[1]["content"])["final_user_question"],
+            "Can it store arbitrary JSON?",
+        )
 
     def test_prompt_requires_a_user_message(self) -> None:
         task = sample_task()

@@ -1,6 +1,8 @@
 from mtrag.interfaces import BatchGuard, ChatClient, NoopGuard
 from mtrag.llm.prompts import (
+    DEFAULT_REWRITE_PROMPT,
     REWRITE_PROMPT_VERSION,
+    PromptTemplate,
     build_rewrite_messages,
 )
 from mtrag.runtime.cache import SqliteCache, stable_key
@@ -17,6 +19,7 @@ class QueryRewriter:
         guard: BatchGuard | None = None,
         max_tokens: int = 128,
         temperature: float = 0.0,
+        prompt: PromptTemplate = DEFAULT_REWRITE_PROMPT,
     ) -> None:
         self.client = client
         self.model_name = model_name
@@ -24,9 +27,10 @@ class QueryRewriter:
         self.guard = guard or NoopGuard()
         self.max_tokens = max_tokens
         self.temperature = temperature
+        self.prompt = prompt
 
     def rewrite(self, task: BenchmarkTask) -> str:
-        messages = build_rewrite_messages(task)
+        messages = build_rewrite_messages(task, prompt=self.prompt)
         key = stable_key(
             REWRITE_PROMPT_VERSION,
             self.model_name,

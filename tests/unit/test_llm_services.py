@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from mtrag.llm.generator import AnswerGenerator
+from mtrag.llm.prompts import PromptTemplate
 from mtrag.llm.rewriter import QueryRewriter
 from mtrag.runtime.cache import SqliteCache
 from mtrag.schemas import BenchmarkTask, Context, Message
@@ -97,6 +98,33 @@ class LlmServicesTest(unittest.TestCase):
             [options["temperature"] for options in client.options],
             [0.0, 0.2],
         )
+
+    def test_rewrite_prompt_content_changes_the_cache_key(self) -> None:
+        client = FakeClient()
+        first = PromptTemplate("You are a query rewriting assistant. A")
+        second = PromptTemplate("You are a query rewriting assistant. B")
+        with tempfile.TemporaryDirectory() as directory:
+            with SqliteCache(Path(directory) / "cache.sqlite") as cache:
+                QueryRewriter(
+                    client,
+                    model_name="fake",
+                    cache=cache,
+                    prompt=first,
+                ).rewrite(task())
+                QueryRewriter(
+                    client,
+                    model_name="fake",
+                    cache=cache,
+                    prompt=first,
+                ).rewrite(task())
+                QueryRewriter(
+                    client,
+                    model_name="fake",
+                    cache=cache,
+                    prompt=second,
+                ).rewrite(task())
+
+        self.assertEqual(client.calls, 2)
 
 
 if __name__ == "__main__":
