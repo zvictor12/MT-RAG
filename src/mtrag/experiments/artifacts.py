@@ -8,86 +8,122 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from mtrag.evaluation import make_retrieval_record, write_retrieval_jsonl
 from mtrag.schemas import BenchmarkTask, Context, SearchHit
-from mtrag.runtime.state import write_json_atomic
 
 
 @dataclass(frozen=True, slots=True)
 class RunArtifacts:
+    """Paths for independently versioned experiment artifacts.
+
+    A campaign may contain many query, retrieval and generation experiments.
+    The semantic fingerprint addresses one immutable revision; changing an
+    unrelated experiment never invalidates the rest of the campaign.
+    """
+
     root: Path
 
     @property
     def cache(self) -> Path:
         return self.root / "cache.sqlite"
 
-    @property
-    def definition(self) -> Path:
-        return self.root / "run-definition.json"
+    def rewrite(self, name: str, revision: str) -> Path:
+        return self._revision("rewrites", name, revision) / "queries.jsonl"
 
-    @property
-    def config_snapshot(self) -> Path:
-        return self.root / "experiment.toml"
+    def bge_features(self, name: str, revision: str) -> Path:
+        return self._revision("features/bge", name, revision)
 
-    @property
-    def qwen_queries(self) -> Path:
-        return self.root / "rewrites" / "qwen.jsonl"
+    def experiment(self, reference: str, revision: str) -> Path:
+        pipeline, output = _retrieval_reference(reference)
+        return self._revision(f"experiments/{pipeline}", output, revision)
 
-    def rewrite_queries(self, name: str) -> Path:
-        return self.root / "rewrites" / f"{name}.jsonl"
+    def candidates(self, reference: str, revision: str) -> Path:
+        return self.experiment(reference, revision) / "candidates.jsonl"
 
-    @property
-    def bge_features(self) -> Path:
-        return self.root / "features" / "bge"
+    def prediction(self, reference: str, revision: str) -> Path:
+        return self.experiment(reference, revision) / "task-a.jsonl"
 
-    def candidates(self, name: str) -> Path:
-        return self.root / "candidates" / f"{name}.jsonl"
+    def retrieval_report(
+        self,
+        reference: str,
+        output_revision: str,
+        evaluation_revision: str,
+    ) -> Path:
+        return (
+            self.experiment(reference, output_revision)
+            / "evaluation"
+            / evaluation_revision
+            / "task-a-metrics.json"
+        )
 
-    def prediction(self, name: str) -> Path:
-        return self.root / "predictions" / "task_a" / f"{name}.jsonl"
+    def generation_dir(self, job: str, revision: str) -> Path:
+        return self._revision("generation", job, revision)
 
-    def retrieval_report(self, name: str) -> Path:
-        return self.root / "evaluation" / "retrieval" / f"{name}.json"
+    def generation(self, job: str, revision: str) -> Path:
+        return self.generation_dir(job, revision) / "predictions.jsonl"
 
-    @property
-    def reranker_gate(self) -> Path:
-        return self.root / "decisions" / "reranker.json"
+    def generation_metrics(
+        self,
+        job: str,
+        generation_revision: str,
+        evaluation_revision: str,
+    ) -> Path:
+        return (
+            self.generation_dir(job, generation_revision)
+            / "evaluation"
+            / evaluation_revision
+            / "ibm-metrics.jsonl"
+        )
 
-    @property
-    def reranker_variants(self) -> Path:
-        return self.root / "decisions" / "reranker-variants.json"
+    def generation_summary(
+        self,
+        job: str,
+        generation_revision: str,
+        evaluation_revision: str,
+    ) -> Path:
+        return (
+            self.generation_dir(job, generation_revision)
+            / "evaluation"
+            / evaluation_revision
+            / "ibm-summary.json"
+        )
 
-    @property
-    def rewrite_winner(self) -> Path:
-        return self.root / "decisions" / "rewrite-winner.json"
+    def stage_marker(self, fingerprint: str) -> Path:
+        _fingerprint(fingerprint)
+        return self.root / "state" / "completed" / f"{fingerprint}.json"
 
-    @property
-    def bge_winner(self) -> Path:
-        return self.root / "decisions" / "bge-winner.json"
-
-    @property
-    def winner(self) -> Path:
-        return self.root / "decisions" / "winner.json"
-
-    def generation(self, task: str) -> Path:
-        return self.root / "predictions" / f"task_{task.lower()}.jsonl"
-
-    def generation_metrics(self, task: str) -> Path:
-        return self.root / "evaluation" / "generation" / f"task_{task.lower()}.jsonl"
-
-    def generation_summary(self, task: str) -> Path:
-        return self.root / "evaluation" / "generation" / f"task_{task.lower()}.json"
+    def _revision(self, category: str, name: str, revision: str) -> Path:
+        _safe_parts(category)
+        _safe_parts(name)
+        _fingerprint(revision)
+        return self.root / category / name / revision
 
     def create_directories(self) -> None:
-        for directory in (
-            self.root / "rewrites",
-            self.bge_features,
-            self.root / "candidates",
-            self.root / "predictions" / "task_a",
-            self.root / "evaluation" / "retrieval",
-            self.root / "decisions",
-            self.root / "predictions",
-            self.root / "evaluation" / "generation",
-        ):
-            directory.mkdir(parents=True, exist_ok=True)
+        self.root.mkdir(parents=True, exist_ok=True)
+        (self.root / "state" / "completed").mkdir(parents=True, exist_ok=True)
+
+
+def _safe_parts(value: str) -> None:
+    path = Path(value)
+    if path.is_absolute():
+        raise ValueError(f"unsafe artifact name: {value!r}")
+    parts = path.parts
+    if not parts or any(part in {"", ".", ".."} for part in parts):
+        raise ValueError(f"unsafe artifact name: {value!r}")
+
+
+def _fingerprint(value: str) -> None:
+    if len(value) != 64 or any(
+        character not in "0123456789abcdef" for character in value
+    ):
+        raise ValueError(f"invalid artifact fingerprint: {value!r}")
+
+
+def _retrieval_reference(reference: str) -> tuple[str, str]:
+    pipeline, separator, output = reference.partition(".")
+    if not separator or "." in output:
+        raise ValueError(f"invalid retrieval reference: {reference!r}")
+    _safe_parts(pipeline)
+    _safe_parts(output)
+    return pipeline, output
 
 
 class JsonlCheckpoint:
@@ -323,17 +359,3 @@ def write_jsonl_atomic(path: str | Path, records: Iterable[Mapping[str, Any]]) -
         os.fsync(handle.fileno())
     temporary.replace(destination)
     return count
-
-
-def lock_run_definition(path: Path, definition: Mapping[str, Any]) -> None:
-    """Prevent a resumed run from silently mixing experiment definitions."""
-    normalized = dict(definition)
-    if path.exists():
-        existing = json.loads(path.read_text(encoding="utf-8"))
-        if existing != normalized:
-            raise RuntimeError(
-                "experiment definition changed; use a new --run-dir "
-                "instead of resuming this run"
-            )
-        return
-    write_json_atomic(path, normalized)

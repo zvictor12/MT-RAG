@@ -1,84 +1,48 @@
 from __future__ import annotations
 
+import json
+from collections.abc import Callable, Mapping
+from typing import Any
+
 from mtrag.experiments.artifacts import RunArtifacts
 from mtrag.experiments.generation_stages import (
-    evaluate_generation,
-    evaluate_generation_bge,
-    evaluate_generation_bge_last,
-    evaluate_generation_bge_selected,
-    generate_task_b,
-    generate_task_c,
-    generate_task_c_bge,
-    generate_task_c_bge_last,
-    generate_task_c_bge_selected,
+    evaluate_generation_jobs,
+    generate_job,
+    unload_ollama,
 )
-from mtrag.experiments.query_stages import (
-    encode_bge,
-    encode_bge_variants,
-    rewrite_qwen,
-    rewrite_qwen_t02,
-)
+from mtrag.experiments.planning import PlannedStage, build_workflow
+from mtrag.experiments.query_stages import encode_bge_query, rewrite_query
 from mtrag.experiments.retrieval_stages import (
-    decide_bge_variants,
-    decide_reranker,
-    evaluate_bge_base,
-    evaluate_bge_rerank,
-    evaluate_bge_variants_base,
-    evaluate_bge_variants_rerank,
-    evaluate_elser_base,
-    evaluate_elser_rerank,
-    fuse_bge,
-    fuse_bge_variants,
-    rerank_bge,
-    rerank_bge_variants,
-    rerank_elser,
-    retrieve_bge,
-    retrieve_bge_variants,
-    retrieve_elser,
-    select_bge,
-    select_bge_variants,
-    select_rewrite_variant,
-    select_winner,
+    evaluate_task_a,
+    fuse,
+    rerank,
+    retrieve,
 )
 from mtrag.experiments.spec import ExperimentConfig
-from mtrag.experiments.preflight import preflight
+from mtrag.runtime.state import write_json_atomic
 
 
-STAGES = {
-    "preflight": preflight,
-    "rewrite_qwen": rewrite_qwen,
-    "rewrite_qwen_t02": rewrite_qwen_t02,
-    "encode_bge": encode_bge,
-    "encode_bge_variants": encode_bge_variants,
-    "retrieve_elser": retrieve_elser,
-    "retrieve_bge": retrieve_bge,
-    "retrieve_bge_variants": retrieve_bge_variants,
-    "fuse_bge": fuse_bge,
-    "fuse_bge_variants": fuse_bge_variants,
-    "evaluate_bge_base": evaluate_bge_base,
-    "evaluate_bge_variants_base": evaluate_bge_variants_base,
-    "evaluate_elser_base": evaluate_elser_base,
-    "rerank_bge": rerank_bge,
-    "rerank_bge_variants": rerank_bge_variants,
-    "evaluate_bge_rerank": evaluate_bge_rerank,
-    "evaluate_bge_variants_rerank": evaluate_bge_variants_rerank,
-    "decide_reranker": decide_reranker,
-    "decide_bge_variants": decide_bge_variants,
-    "select_bge": select_bge,
-    "select_bge_variants": select_bge_variants,
-    "select_rewrite_variant": select_rewrite_variant,
-    "rerank_elser": rerank_elser,
-    "evaluate_elser_rerank": evaluate_elser_rerank,
-    "select_winner": select_winner,
-    "generate_task_b": generate_task_b,
-    "generate_task_c_bge": generate_task_c_bge,
-    "evaluate_generation_bge": evaluate_generation_bge,
-    "generate_task_c_bge_last": generate_task_c_bge_last,
-    "evaluate_generation_bge_last": evaluate_generation_bge_last,
-    "generate_task_c_bge_selected": generate_task_c_bge_selected,
-    "evaluate_generation_bge_selected": evaluate_generation_bge_selected,
-    "generate_task_c": generate_task_c,
-    "evaluate_generation": evaluate_generation,
+Executor = Callable[[ExperimentConfig, RunArtifacts, Mapping[str, Any]], None]
+
+
+def _call(function) -> Executor:
+    return lambda config, artifacts, params: function(
+        config,
+        artifacts,
+        **params,
+    )
+
+
+EXECUTORS: dict[str, Executor] = {
+    "rewrite": _call(rewrite_query),
+    "encode": _call(encode_bge_query),
+    "retrieve": _call(retrieve),
+    "fuse": _call(fuse),
+    "rerank": _call(rerank),
+    "evaluate_task_a": _call(evaluate_task_a),
+    "generate": _call(generate_job),
+    "unload_ollama": _call(unload_ollama),
+    "evaluate_generation_batch": _call(evaluate_generation_jobs),
 }
 
 
@@ -86,9 +50,81 @@ def run_stage(
     name: str,
     config: ExperimentConfig,
     artifacts: RunArtifacts,
+    *,
+    schedule: str,
 ) -> None:
+    workflow = build_workflow(config, schedule=schedule)
+    stage = workflow.stage(name)
+    artifacts.create_directories()
+    if _is_complete(stage, artifacts):
+        print(f"reused {stage.name}", flush=True)
+        return
+    EXECUTORS[stage.kind](config, artifacts, stage.params)
+    write_json_atomic(
+        artifacts.stage_marker(stage.fingerprint),
+        {
+            "stage": stage.name,
+            "kind": stage.kind,
+            "fingerprint": stage.fingerprint,
+            "params": stage.params,
+        },
+    )
+
+
+def _is_complete(stage: PlannedStage, artifacts: RunArtifacts) -> bool:
+    if stage.kind == "unload_ollama":
+        return False
+    marker = artifacts.stage_marker(stage.fingerprint)
+    if not marker.is_file():
+        return False
     try:
-        stage = STAGES[name]
-    except KeyError as error:
-        raise ValueError(f"unknown experiment stage: {name}") from error
-    stage(config, artifacts)
+        stored = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if (
+        stored.get("stage") != stage.name
+        or stored.get("kind") != stage.kind
+        or stored.get("fingerprint") != stage.fingerprint
+    ):
+        return False
+    params = stage.params
+    if stage.kind == "rewrite":
+        return artifacts.rewrite(
+            params["query_name"], params["query_revision"]
+        ).is_file()
+    if stage.kind == "encode":
+        directory = artifacts.bge_features(
+            params["query_name"], params["feature_revision"]
+        )
+        return (directory / "dense.npz").is_file() and (
+            directory / "sparse.jsonl"
+        ).is_file()
+    if stage.kind in {"retrieve", "fuse", "rerank"}:
+        return artifacts.candidates(
+            params["reference"], params["revision"]
+        ).is_file()
+    if stage.kind == "evaluate_task_a":
+        return artifacts.retrieval_report(
+            params["reference"],
+            params["revision"],
+            params["evaluation_revision"],
+        ).is_file()
+    if stage.kind == "generate":
+        return artifacts.generation(
+            params["job_name"], params["revision"]
+        ).is_file()
+    if stage.kind == "evaluate_generation_batch":
+        return all(
+            artifacts.generation_metrics(
+                job["job_name"],
+                job["generation_revision"],
+                job["evaluation_revision"],
+            ).is_file()
+            and artifacts.generation_summary(
+                job["job_name"],
+                job["generation_revision"],
+                job["evaluation_revision"],
+            ).is_file()
+            for job in params["jobs"]
+        )
+    return True

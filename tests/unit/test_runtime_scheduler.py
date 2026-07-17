@@ -11,7 +11,7 @@ from mtrag.runtime.scheduler import (
     SubprocessScheduler,
     _ResourcePool,
 )
-from mtrag.runtime.state import StageStatus
+from mtrag.runtime.state import StageStatus, StateStore
 
 
 def python_command(source: str, *arguments: Path) -> tuple[str, ...]:
@@ -98,7 +98,7 @@ class SchedulerTest(unittest.TestCase):
                 StageStatus.BLOCKED,
             )
 
-    def test_resume_does_not_repeat_successful_stage(self) -> None:
+    def test_resume_reconsiders_successful_stage(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             counter = root / "counter.txt"
@@ -136,9 +136,27 @@ class SchedulerTest(unittest.TestCase):
                 resume=True,
             ).run_sync()
 
-            self.assertEqual(counter.read_text(), "1")
+            self.assertEqual(counter.read_text(), "2")
             self.assertTrue(second.complete)
             self.assertEqual(second.stages["retry_later"].attempts, 2)
+
+    def test_inactive_pending_stage_does_not_block_another_schedule(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            StateStore(root, ("old",), resume=False)
+
+            manifest = SubprocessScheduler(
+                (StageSpec("current", python_command("raise SystemExit(0)")),),
+                root,
+                resume=True,
+            ).run_sync()
+
+            self.assertEqual(manifest.stages["old"].status, StageStatus.PENDING)
+            self.assertEqual(
+                manifest.stages["current"].status,
+                StageStatus.SUCCEEDED,
+            )
+            self.assertTrue(manifest.complete_for(("current",)))
 
     def test_graceful_stop_is_resumable(self) -> None:
         async def scenario(root: Path) -> None:

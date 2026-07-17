@@ -10,3 +10,7 @@ artifacts/elasticsearch/archives/**
 artifacts/elasticsearch/snapshots/**
 !artifacts/elasticsearch/snapshots/**/
 !artifacts/elasticsearch/snapshots/**/.gitkeep
+
+# Experiment campaigns are content-addressed runtime data. Existing tracked
+# historical files stay tracked, but new revisions must not become Git blobs.
+runs/**

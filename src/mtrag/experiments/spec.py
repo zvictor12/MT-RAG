@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import tomllib
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -18,6 +19,31 @@ def _section(document: Mapping[str, Any], name: str) -> Mapping[str, Any]:
 def _path(value: str, project_root: Path) -> Path:
     expanded = Path(os.path.expandvars(value)).expanduser()
     return expanded if expanded.is_absolute() else project_root / expanded
+
+
+def _required_string(section: Mapping[str, Any], name: str, label: str) -> str:
+    value = section.get(name)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{label}.{name} must be a non-empty string")
+    return value.strip()
+
+
+def _string_tuple(value: Any, label: str) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise ValueError(f"{label} must be an array of strings")
+    result = tuple(value)
+    if any(not isinstance(item, str) or not item.strip() for item in result):
+        raise ValueError(f"{label} must be an array of non-empty strings")
+    return tuple(item.strip() for item in result)
+
+
+_SAFE_NAME = re.compile(r"[a-z][a-z0-9_]*")
+PIPELINE_OUTPUTS = {
+    "bge": frozenset(("dense", "sparse", "rrf", "rrf_reranked")),
+    "elser": frozenset(("base", "reranked")),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,25 +80,50 @@ class ModelConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class RewriteVariantConfig:
+class QueryConfig:
     name: str
-    temperature: float
+    kind: str
+    prompt: Path | None
+    temperature: float | None
+    max_tokens: int | None
 
 
 @dataclass(frozen=True, slots=True)
-class RewritingConfig:
-    max_tokens: int
-    variants: tuple[RewriteVariantConfig, ...]
+class PipelineConfig:
+    name: str
+    kind: str
+    query: str
 
-    def variant(self, name: str) -> RewriteVariantConfig:
-        for variant in self.variants:
-            if variant.name == name:
-                return variant
-        raise ValueError(f"unknown rewrite variant: {name}")
+
+@dataclass(frozen=True, slots=True)
+class GeneratorConfig:
+    name: str
+    prompt: Path
+    temperature: float
+    max_tokens: int
+    context_top_k: int
+
+
+@dataclass(frozen=True, slots=True)
+class GenerationJobConfig:
+    name: str
+    task: str
+    generator: str
+    contexts: str
+    evaluate: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduleConfig:
+    name: str
+    task_a: tuple[str, ...]
+    generation: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class RetrievalConfig:
+    bge_index_revision: str
+    elser_index_revision: str
     dense_top_k: int
     dense_candidate_multiplier: int
     dense_rescore_oversample: float
@@ -89,18 +140,10 @@ class RerankingConfig:
     input_top_k: int
     output_top_k: int
     task_batch_size: int
-    minimum_ndcg5_gain: float
-    minimum_improvement_probability: float
-    bootstrap_samples: int
-    bootstrap_seed: int
 
 
 @dataclass(frozen=True, slots=True)
-class GenerationConfig:
-    context_top_k: int
-    max_tokens: int
-    temperature: float
-    run_algorithmic_metrics: bool
+class EvaluationConfig:
     bertscore_model: str
     bertscore_batch_size: int
 
@@ -109,10 +152,8 @@ class GenerationConfig:
 class ThermalConfig:
     gpu_pause: float
     gpu_resume: float
-    gpu_abort: float
     cpu_pause: float
     cpu_resume: float
-    cpu_abort: float
     poll_interval: float
     resume_hold: float
 
@@ -124,10 +165,14 @@ class ExperimentConfig:
     run: RunConfig
     services: ServiceConfig
     models: ModelConfig
-    rewriting: RewritingConfig
+    queries: tuple[QueryConfig, ...]
+    pipelines: tuple[PipelineConfig, ...]
+    generators: tuple[GeneratorConfig, ...]
+    generation_jobs: tuple[GenerationJobConfig, ...]
+    schedules: tuple[ScheduleConfig, ...]
     retrieval: RetrievalConfig
     reranking: RerankingConfig
-    generation: GenerationConfig
+    evaluation: EvaluationConfig
     thermal: ThermalConfig
 
     @classmethod
@@ -139,16 +184,14 @@ class ExperimentConfig:
         run = _section(document, "run")
         services = _section(document, "services")
         models = _section(document, "models")
-        rewriting = _section(document, "rewriting")
-        rewrite_variants = _section(rewriting, "variants")
-        if not rewrite_variants:
-            rewrite_variants = {
-                "qwen_t0": {"temperature": 0.0},
-                "qwen_t02": {"temperature": 0.2},
-            }
+        queries = _section(document, "queries")
+        pipelines = _section(document, "pipelines")
+        generators = _section(document, "generators")
+        generation_jobs = _section(document, "generation")
+        schedules = _section(document, "schedules")
         retrieval = _section(document, "retrieval")
         reranking = _section(document, "reranking")
-        generation = _section(document, "generation")
+        evaluation = _section(document, "evaluation")
         thermal = _section(document, "thermal")
 
         config = cls(
@@ -201,22 +244,66 @@ class ExperimentConfig:
                 ollama_seed=int(models.get("ollama_seed", 42)),
                 ollama_timeout=int(models.get("ollama_timeout", 600)),
             ),
-            rewriting=RewritingConfig(
-                max_tokens=int(rewriting.get("max_tokens", 128)),
-                variants=tuple(
-                    RewriteVariantConfig(
-                        name=str(name),
-                        temperature=float(
-                            _section(rewrite_variants, str(name)).get(
-                                "temperature",
-                                0.0,
-                            )
-                        ),
-                    )
-                    for name in rewrite_variants
-                ),
+            queries=tuple(
+                _query_config(str(name), _section(queries, str(name)), project_root)
+                for name in queries
+            ),
+            pipelines=tuple(
+                PipelineConfig(
+                    name=str(name),
+                    kind=_required_string(
+                        _section(pipelines, str(name)),
+                        "kind",
+                        f"pipelines.{name}",
+                    ),
+                    query=_required_string(
+                        _section(pipelines, str(name)),
+                        "query",
+                        f"pipelines.{name}",
+                    ),
+                )
+                for name in pipelines
+            ),
+            generators=tuple(
+                _generator_config(
+                    str(name),
+                    _section(generators, str(name)),
+                    project_root,
+                )
+                for name in generators
+            ),
+            generation_jobs=tuple(
+                _generation_job_config(
+                    str(name),
+                    _section(generation_jobs, str(name)),
+                )
+                for name in generation_jobs
+            ),
+            schedules=tuple(
+                ScheduleConfig(
+                    name=str(name),
+                    task_a=_string_tuple(
+                        _section(schedules, str(name)).get("task_a"),
+                        f"schedules.{name}.task_a",
+                    ),
+                    generation=_string_tuple(
+                        _section(schedules, str(name)).get("generation"),
+                        f"schedules.{name}.generation",
+                    ),
+                )
+                for name in schedules
             ),
             retrieval=RetrievalConfig(
+                bge_index_revision=_required_string(
+                    retrieval,
+                    "bge_index_revision",
+                    "retrieval",
+                ),
+                elser_index_revision=_required_string(
+                    retrieval,
+                    "elser_index_revision",
+                    "retrieval",
+                ),
                 dense_top_k=int(retrieval.get("dense_top_k", 50)),
                 dense_candidate_multiplier=int(
                     retrieval.get("dense_candidate_multiplier", 10)
@@ -235,37 +322,23 @@ class ExperimentConfig:
                 input_top_k=int(reranking.get("input_top_k", 20)),
                 output_top_k=int(reranking.get("output_top_k", 10)),
                 task_batch_size=int(reranking.get("task_batch_size", 32)),
-                minimum_ndcg5_gain=float(
-                    reranking.get("minimum_ndcg5_gain", 0.01)
-                ),
-                minimum_improvement_probability=float(
-                    reranking.get("minimum_improvement_probability", 0.95)
-                ),
-                bootstrap_samples=int(reranking.get("bootstrap_samples", 5000)),
-                bootstrap_seed=int(reranking.get("bootstrap_seed", 42)),
             ),
-            generation=GenerationConfig(
-                context_top_k=int(generation.get("context_top_k", 5)),
-                max_tokens=int(generation.get("max_tokens", 512)),
-                temperature=float(generation.get("temperature", 0.0)),
-                run_algorithmic_metrics=bool(
-                    generation.get("run_algorithmic_metrics", False)
-                ),
+            evaluation=EvaluationConfig(
                 bertscore_model=str(
-                    generation.get(
+                    evaluation.get(
                         "bertscore_model",
                         "microsoft/deberta-xlarge-mnli",
                     )
                 ),
-                bertscore_batch_size=int(generation.get("bertscore_batch_size", 2)),
+                bertscore_batch_size=int(
+                    evaluation.get("bertscore_batch_size", 2)
+                ),
             ),
             thermal=ThermalConfig(
                 gpu_pause=float(thermal.get("gpu_pause", 80.0)),
                 gpu_resume=float(thermal.get("gpu_resume", 72.0)),
-                gpu_abort=float(thermal.get("gpu_abort", 86.0)),
                 cpu_pause=float(thermal.get("cpu_pause", 90.0)),
                 cpu_resume=float(thermal.get("cpu_resume", 80.0)),
-                cpu_abort=float(thermal.get("cpu_abort", 97.0)),
                 poll_interval=float(thermal.get("poll_interval", 5.0)),
                 resume_hold=float(thermal.get("resume_hold", 30.0)),
             ),
@@ -277,6 +350,50 @@ class ExperimentConfig:
     def default_run_dir(self) -> Path:
         return self.run.output_root / self.run.name
 
+    def query(self, name: str) -> QueryConfig:
+        for query in self.queries:
+            if query.name == name:
+                return query
+        raise ValueError(f"unknown query: {name}")
+
+    def pipeline(self, name: str) -> PipelineConfig:
+        for pipeline in self.pipelines:
+            if pipeline.name == name:
+                return pipeline
+        raise ValueError(f"unknown pipeline: {name}")
+
+    def generator(self, name: str) -> GeneratorConfig:
+        for generator in self.generators:
+            if generator.name == name:
+                return generator
+        raise ValueError(f"unknown generator: {name}")
+
+    def generation_job(self, name: str) -> GenerationJobConfig:
+        for job in self.generation_jobs:
+            if job.name == name:
+                return job
+        raise ValueError(f"unknown generation job: {name}")
+
+    def schedule(self, name: str) -> ScheduleConfig:
+        for schedule in self.schedules:
+            if schedule.name == name:
+                return schedule
+        raise ValueError(f"unknown schedule: {name}")
+
+    def resolve_retrieval_output(self, reference: str) -> tuple[PipelineConfig, str]:
+        pipeline_name, separator, output = reference.partition(".")
+        if not separator or "." in output:
+            raise ValueError(
+                f"retrieval output must be '<pipeline>.<output>': {reference!r}"
+            )
+        pipeline = self.pipeline(pipeline_name)
+        if output not in PIPELINE_OUTPUTS[pipeline.kind]:
+            raise ValueError(
+                f"pipeline {pipeline.name!r} ({pipeline.kind}) has no output "
+                f"{output!r}"
+            )
+        return pipeline, output
+
     def validate(self) -> None:
         positive = {
             "run.cpu_slots": self.run.cpu_slots,
@@ -286,7 +403,6 @@ class ExperimentConfig:
             "models.reranker_max_length": self.models.reranker_max_length,
             "models.ollama_num_ctx": self.models.ollama_num_ctx,
             "models.ollama_timeout": self.models.ollama_timeout,
-            "rewriting.max_tokens": self.rewriting.max_tokens,
             "retrieval.dense_top_k": self.retrieval.dense_top_k,
             "retrieval.dense_candidate_multiplier": (
                 self.retrieval.dense_candidate_multiplier
@@ -300,11 +416,31 @@ class ExperimentConfig:
             "reranking.input_top_k": self.reranking.input_top_k,
             "reranking.output_top_k": self.reranking.output_top_k,
             "reranking.task_batch_size": self.reranking.task_batch_size,
-            "reranking.bootstrap_samples": self.reranking.bootstrap_samples,
-            "generation.context_top_k": self.generation.context_top_k,
-            "generation.max_tokens": self.generation.max_tokens,
-            "generation.bertscore_batch_size": self.generation.bertscore_batch_size,
+            "evaluation.bertscore_batch_size": (
+                self.evaluation.bertscore_batch_size
+            ),
         }
+        positive.update(
+            {
+                f"queries.{query.name}.max_tokens": query.max_tokens
+                for query in self.queries
+                if query.max_tokens is not None
+            }
+        )
+        positive.update(
+            {
+                f"generators.{generator.name}.max_tokens": generator.max_tokens
+                for generator in self.generators
+            }
+        )
+        positive.update(
+            {
+                f"generators.{generator.name}.context_top_k": (
+                    generator.context_top_k
+                )
+                for generator in self.generators
+            }
+        )
         invalid = [name for name, value in positive.items() if value <= 0]
         if invalid:
             raise ValueError(f"configuration values must be positive: {', '.join(invalid)}")
@@ -312,37 +448,171 @@ class ExperimentConfig:
             raise ValueError("retrieval.prediction_top_k cannot exceed the official limit 10")
         if self.retrieval.dense_rescore_oversample < 1.0:
             raise ValueError("dense_rescore_oversample must be at least 1.0")
-        if not 0.0 <= self.generation.temperature <= 2.0:
-            raise ValueError("generation.temperature must be between 0 and 2")
-        rewrite_names = [variant.name for variant in self.rewriting.variants]
-        if len(rewrite_names) != len(set(rewrite_names)):
-            raise ValueError("rewrite variant names must be unique")
-        invalid_names = [
-            name
-            for name in rewrite_names
-            if re.fullmatch(r"[a-z][a-z0-9_]*", name) is None
-        ]
-        if invalid_names:
-            raise ValueError("rewrite variant names must be safe identifiers")
-        missing_variants = {"qwen_t0", "qwen_t02"} - set(rewrite_names)
-        if missing_variants:
+        if self.evaluation.bertscore_model != "microsoft/deberta-xlarge-mnli":
             raise ValueError(
-                "missing required rewrite variants: "
-                + ", ".join(sorted(missing_variants))
+                "the official IBM evaluator requires "
+                "evaluation.bertscore_model='microsoft/deberta-xlarge-mnli'"
             )
+        names = (
+            *(query.name for query in self.queries),
+            *(pipeline.name for pipeline in self.pipelines),
+            *(generator.name for generator in self.generators),
+            *(job.name for job in self.generation_jobs),
+            *(schedule.name for schedule in self.schedules),
+        )
+        invalid_names = [name for name in names if _SAFE_NAME.fullmatch(name) is None]
+        if invalid_names:
+            raise ValueError(
+                "configuration names must be safe identifiers: "
+                + ", ".join(invalid_names)
+            )
+
+        invalid_query_kinds = [
+            query.name
+            for query in self.queries
+            if query.kind not in {"last_turn", "gold", "rewrite"}
+        ]
+        if invalid_query_kinds:
+            raise ValueError(
+                "unknown query kind: " + ", ".join(invalid_query_kinds)
+            )
+        invalid_pipeline_kinds = [
+            pipeline.name
+            for pipeline in self.pipelines
+            if pipeline.kind not in PIPELINE_OUTPUTS
+        ]
+        if invalid_pipeline_kinds:
+            raise ValueError(
+                "unknown pipeline kind: " + ", ".join(invalid_pipeline_kinds)
+            )
+
         invalid_temperatures = [
-            variant.name
-            for variant in self.rewriting.variants
-            if not 0.0 <= variant.temperature <= 2.0
+            query.name
+            for query in self.queries
+            if query.temperature is not None
+            and not 0.0 <= query.temperature <= 2.0
+        ] + [
+            generator.name
+            for generator in self.generators
+            if not 0.0 <= generator.temperature <= 2.0
         ]
         if invalid_temperatures:
             raise ValueError(
-                "rewrite temperatures must be between 0 and 2: "
+                "temperatures must be between 0 and 2: "
                 + ", ".join(invalid_temperatures)
             )
+        missing_prompts = [
+            str(query.prompt)
+            for query in self.queries
+            if query.prompt is not None and not query.prompt.is_file()
+        ] + [
+            str(generator.prompt)
+            for generator in self.generators
+            if not generator.prompt.is_file()
+        ]
+        if missing_prompts:
+            raise ValueError("prompt file is missing: " + ", ".join(missing_prompts))
+
+        for pipeline in self.pipelines:
+            self.query(pipeline.query)
+        for job in self.generation_jobs:
+            self.generator(job.generator)
+            if job.task == "b":
+                if job.contexts != "reference":
+                    raise ValueError(
+                        f"generation.{job.name}: Task B contexts must be 'reference'"
+                    )
+            elif job.task == "c":
+                if job.contexts == "reference":
+                    raise ValueError(
+                        f"generation.{job.name}: Task C requires a retrieval output"
+                    )
+                self.resolve_retrieval_output(job.contexts)
+            else:
+                raise ValueError(
+                    f"generation.{job.name}.task must be 'b' or 'c'"
+                )
+
+        for schedule in self.schedules:
+            for reference in schedule.task_a:
+                self.resolve_retrieval_output(reference)
+            for job_name in schedule.generation:
+                self.generation_job(job_name)
+
         if self.reranking.input_top_k > self.retrieval.rrf_top_k:
             raise ValueError("reranking.input_top_k cannot exceed retrieval.rrf_top_k")
         if self.reranking.output_top_k > self.reranking.input_top_k:
             raise ValueError("reranking.output_top_k cannot exceed reranking.input_top_k")
-        if not 0.0 <= self.reranking.minimum_improvement_probability <= 1.0:
-            raise ValueError("minimum_improvement_probability must be between 0 and 1")
+        oversized_contexts = [
+            generator.name
+            for generator in self.generators
+            if generator.context_top_k > 10
+        ]
+        if oversized_contexts:
+            raise ValueError(
+                "generator context_top_k cannot exceed the official limit 10: "
+                + ", ".join(oversized_contexts)
+            )
+
+
+def _query_config(
+    name: str,
+    section: Mapping[str, Any],
+    project_root: Path,
+) -> QueryConfig:
+    kind = _required_string(section, "kind", f"queries.{name}")
+    if kind != "rewrite":
+        return QueryConfig(
+            name=name,
+            kind=kind,
+            prompt=None,
+            temperature=None,
+            max_tokens=None,
+        )
+    return QueryConfig(
+        name=name,
+        kind=kind,
+        prompt=_path(
+            _required_string(section, "prompt", f"queries.{name}"),
+            project_root,
+        ),
+        temperature=float(section.get("temperature", 0.0)),
+        max_tokens=int(section.get("max_tokens", 128)),
+    )
+
+
+def _generator_config(
+    name: str,
+    section: Mapping[str, Any],
+    project_root: Path,
+) -> GeneratorConfig:
+    return GeneratorConfig(
+        name=name,
+        prompt=_path(
+            _required_string(section, "prompt", f"generators.{name}"),
+            project_root,
+        ),
+        temperature=float(section.get("temperature", 0.0)),
+        max_tokens=int(section.get("max_tokens", 512)),
+        context_top_k=int(section.get("context_top_k", 5)),
+    )
+
+
+def _generation_job_config(
+    name: str,
+    section: Mapping[str, Any],
+) -> GenerationJobConfig:
+    evaluate = section.get("evaluate", True)
+    if not isinstance(evaluate, bool):
+        raise ValueError(f"generation.{name}.evaluate must be a boolean")
+    return GenerationJobConfig(
+        name=name,
+        task=_required_string(section, "task", f"generation.{name}"),
+        generator=_required_string(
+            section,
+            "generator",
+            f"generation.{name}",
+        ),
+        contexts=_required_string(section, "contexts", f"generation.{name}"),
+        evaluate=evaluate,
+    )

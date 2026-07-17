@@ -4,22 +4,18 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from mtrag.experiments.artifacts import RunArtifacts, read_jsonl, write_jsonl_atomic
-from mtrag.experiments.query_stages import rewrite_qwen, rewrite_qwen_t02
+from mtrag.experiments.artifacts import RunArtifacts, read_jsonl
+from mtrag.experiments.query_stages import rewrite_query
 from mtrag.schemas import BenchmarkTask, Message
 
 
 COLLECTION = "mt-rag-clapnq-elser-512-100-20240503"
 
 
-def task(
-    conversation_id: str,
-    turn: int,
-    messages: tuple[Message, ...],
-) -> BenchmarkTask:
+def task(turn: int, messages: tuple[Message, ...]) -> BenchmarkTask:
     return BenchmarkTask(
-        task_id=f"{conversation_id}<::>{turn}",
-        conversation_id=conversation_id,
+        task_id=f"conversation<::>{turn}",
+        conversation_id="conversation",
         turn=turn,
         collection=COLLECTION,
         domain="clapnq",
@@ -28,102 +24,9 @@ def task(
 
 
 class RewriteStageTest(unittest.TestCase):
-    def test_single_turns_bypass_qwen_and_existing_rows_are_repaired(self) -> None:
-        first = task(
-            "conversation",
-            1,
-            (Message("user", "Where do the Cardinals play this week?"),),
-        )
+    def test_named_rewrite_uses_its_own_prompt_temperature_and_revision(self) -> None:
+        first = task(1, (Message("user", "What is Cloudant?"),))
         second = task(
-            "conversation",
-            2,
-            (
-                Message("user", "Where do the Cardinals play this week?"),
-                Message("agent", "They play in Arizona."),
-                Message("user", "Is it indoors?"),
-            ),
-        )
-        another_first = task(
-            "another",
-            1,
-            (Message("user", "What is Cloudant?"),),
-        )
-
-        with tempfile.TemporaryDirectory() as directory:
-            artifacts = RunArtifacts(Path(directory))
-            write_jsonl_atomic(
-                artifacts.qwen_queries,
-                [
-                    {
-                        "task_id": first.task_id,
-                        "query": "Arizona Cardinals schedule",
-                        "model": "qwen",
-                    }
-                ],
-            )
-            repository = MagicMock()
-            repository.load_tasks.return_value = (first, second, another_first)
-            rewriter = MagicMock()
-            rewriter.rewrite.return_value = (
-                "Do the Arizona Cardinals play indoors this week?"
-            )
-            client = MagicMock()
-            config = SimpleNamespace(
-                run=SimpleNamespace(benchmark_root=Path("benchmark")),
-                models=SimpleNamespace(
-                    ollama_model="qwen",
-                    ollama_digest="digest",
-                ),
-                rewriting=SimpleNamespace(max_tokens=128),
-            )
-
-            with (
-                patch(
-                    "mtrag.experiments.query_stages.BenchmarkRepository",
-                    return_value=repository,
-                ),
-                patch(
-                    "mtrag.experiments.query_stages.ollama_client",
-                    return_value=client,
-                ),
-                patch(
-                    "mtrag.experiments.query_stages.QueryRewriter",
-                    return_value=rewriter,
-                ),
-                patch("mtrag.experiments.query_stages.thermal_guard"),
-            ):
-                rewrite_qwen(config, artifacts)
-
-            records = {
-                record["task_id"]: record
-                for record in read_jsonl(artifacts.qwen_queries)
-            }
-            self.assertEqual(records[first.task_id]["query"], first.messages[-1].text)
-            self.assertEqual(records[first.task_id]["rewrite_method"], "identity")
-            self.assertEqual(
-                records[another_first.task_id]["query"],
-                another_first.messages[-1].text,
-            )
-            self.assertEqual(
-                records[second.task_id]["query"],
-                "Do the Arizona Cardinals play indoors this week?",
-            )
-            self.assertEqual(records[second.task_id]["rewrite_method"], "qwen")
-            self.assertEqual(
-                records[second.task_id]["rewrite_version"],
-                "qwen-rewrite-v2",
-            )
-            rewriter.rewrite.assert_called_once_with(second)
-            client.unload.assert_called_once_with()
-
-    def test_temperature_variant_uses_a_separate_checkpoint(self) -> None:
-        first = task(
-            "conversation",
-            1,
-            (Message("user", "What is Cloudant?"),),
-        )
-        second = task(
-            "conversation",
             2,
             (
                 Message("user", "What is Cloudant?"),
@@ -132,33 +35,32 @@ class RewriteStageTest(unittest.TestCase):
             ),
         )
         with tempfile.TemporaryDirectory() as directory:
-            artifacts = RunArtifacts(Path(directory))
-            write_jsonl_atomic(
-                artifacts.qwen_queries,
-                [
-                    {"task_id": first.task_id, "query": first.messages[-1].text},
-                    {"task_id": second.task_id, "query": "Who operates Cloudant?"},
-                ],
+            root = Path(directory)
+            prompt = root / "rewrite.txt"
+            prompt.write_text("Rewrite the query.")
+            artifacts = RunArtifacts(root / "run")
+            query = SimpleNamespace(
+                kind="rewrite",
+                prompt=prompt,
+                temperature=0.35,
+                max_tokens=96,
+            )
+            config = SimpleNamespace(
+                query=lambda _name: query,
+                run=SimpleNamespace(benchmark_root=root / "benchmark"),
+                models=SimpleNamespace(
+                    ollama_model="qwen",
+                    ollama_digest="digest",
+                    ollama_num_ctx=8192,
+                    ollama_seed=42,
+                ),
             )
             repository = MagicMock()
             repository.load_tasks.return_value = (first, second)
             rewriter = MagicMock()
             rewriter.rewrite.return_value = "Which company operates Cloudant?"
             client = MagicMock()
-            config = SimpleNamespace(
-                run=SimpleNamespace(benchmark_root=Path("benchmark")),
-                models=SimpleNamespace(
-                    ollama_model="qwen",
-                    ollama_digest="digest",
-                ),
-                rewriting=SimpleNamespace(
-                    max_tokens=128,
-                    variants=(
-                        SimpleNamespace(name="qwen_t0", temperature=0.0),
-                        SimpleNamespace(name="qwen_t02", temperature=0.2),
-                    ),
-                ),
-            )
+            revision = "a" * 64
 
             with (
                 patch(
@@ -175,16 +77,23 @@ class RewriteStageTest(unittest.TestCase):
                 ) as rewriter_type,
                 patch("mtrag.experiments.query_stages.thermal_guard"),
             ):
-                rewrite_qwen_t02(config, artifacts)
+                rewrite_query(
+                    config,
+                    artifacts,
+                    query_name="qwen_alt",
+                    query_revision=revision,
+                )
 
-            records = read_jsonl(artifacts.rewrite_queries("qwen_t02"))
-            self.assertEqual([row["temperature"] for row in records], [0.2, 0.2])
-            self.assertEqual(records[0]["rewrite_method"], "identity")
-            self.assertEqual(records[1]["query"], "Which company operates Cloudant?")
-            self.assertEqual(
-                rewriter_type.call_args.kwargs["temperature"],
-                0.2,
-            )
+            records = read_jsonl(artifacts.rewrite("qwen_alt", revision))
+
+        self.assertEqual(records[0]["query"], "What is Cloudant?")
+        self.assertEqual(records[0]["rewrite_method"], "identity")
+        self.assertEqual(records[1]["query"], "Which company operates Cloudant?")
+        self.assertEqual(records[1]["temperature"], 0.35)
+        self.assertEqual(rewriter_type.call_args.kwargs["max_tokens"], 96)
+        self.assertEqual(rewriter_type.call_args.kwargs["prompt"].text, "Rewrite the query.")
+        rewriter.rewrite.assert_called_once_with(second)
+        client.unload.assert_called_once_with()
 
 
 if __name__ == "__main__":

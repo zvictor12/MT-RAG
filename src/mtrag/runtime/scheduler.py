@@ -412,8 +412,8 @@ class SubprocessScheduler:
 
                 if not self._tasks:
                     pending = any(
-                        state.status is StageStatus.PENDING
-                        for state in self.manifest.stages.values()
+                        self.manifest.stages[name].status is StageStatus.PENDING
+                        for name in self.by_name
                     )
                     if not pending or self._stop_requested:
                         break
@@ -453,7 +453,7 @@ class SubprocessScheduler:
             self._restore_signal_handlers(loop, previous_handlers)
             self.store.events.append(
                 "scheduler_stopped",
-                complete=self.manifest.complete,
+                complete=self.manifest.complete_for(self.by_name),
                 stop_requested=self._stop_requested,
             )
         return self.manifest

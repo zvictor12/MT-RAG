@@ -39,7 +39,7 @@ class ThermalGuardTest(unittest.TestCase):
         self.assertEqual(reader.index, 4)
         self.assertEqual(sleeps, [1.0, 1.0, 1.0])
 
-    def test_temperature_above_the_old_abort_limit_only_pauses(self) -> None:
+    def test_high_temperature_only_pauses(self) -> None:
         reader = SequenceReader([100.0, 71.0])
         sleeps: list[float] = []
         guard = ThermalGuard(
@@ -78,7 +78,7 @@ class ThermalGuardTest(unittest.TestCase):
 
     def test_threshold_order_is_validated(self) -> None:
         with self.assertRaises(ValueError):
-            ThermalThresholds(pause=80, resume=80, abort=86)
+            ThermalThresholds(pause=80, resume=80)
 
 
 if __name__ == "__main__":

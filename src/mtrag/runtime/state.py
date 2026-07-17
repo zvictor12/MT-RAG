@@ -103,9 +103,14 @@ class RunManifest:
 
     @property
     def complete(self) -> bool:
+        return self.complete_for(self.stages)
+
+    def complete_for(self, stage_names: Iterable[str]) -> bool:
         return all(
-            stage.status in {StageStatus.SUCCEEDED, StageStatus.SKIPPED}
-            for stage in self.stages.values()
+            name in self.stages
+            and self.stages[name].status
+            in {StageStatus.SUCCEEDED, StageStatus.SKIPPED}
+            for name in stage_names
         )
 
 
@@ -131,7 +136,7 @@ def write_json_atomic(path: Path, value: Mapping[str, Any]) -> None:
 
 
 class EventLog:
-    """Append-only JSONL audit log for scheduler decisions."""
+    """Append-only JSONL audit log for scheduler events."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -198,22 +203,10 @@ class StateStore:
 
     def _prepare_resume(self, stage_names: Iterable[str]) -> None:
         names = tuple(stage_names)
-        current = set(names)
-        self.manifest.stages = {
-            name: state
-            for name, state in self.manifest.stages.items()
-            if name in current
-        }
-        reset_statuses = {
-            StageStatus.RUNNING,
-            StageStatus.FAILED,
-            StageStatus.BLOCKED,
-            StageStatus.INTERRUPTED,
-        }
         reset: list[str] = []
         for name in names:
             state = self.manifest.stages.setdefault(name, StageState())
-            if state.status in reset_statuses:
+            if state.status is not StageStatus.PENDING:
                 state.status = StageStatus.PENDING
                 state.pid = None
                 state.return_code = None
@@ -221,7 +214,7 @@ class StateStore:
                 state.error = None
                 reset.append(name)
         self.save()
-        self.events.append("run_resumed", reset_stages=reset)
+        self.events.append("run_resumed", reconsidered_stages=reset)
 
     def save(self) -> None:
         self.manifest.updated_at = utc_now()

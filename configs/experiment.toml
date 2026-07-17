@@ -25,16 +25,121 @@ ollama_keep_alive = "10m"
 ollama_seed = 42
 ollama_timeout = 600
 
-[rewriting]
+[queries.last]
+kind = "last_turn"
+
+[queries.gold]
+kind = "gold"
+
+[queries.qwen_t0]
+kind = "rewrite"
+prompt = "src/mtrag/llm/templates/rewrite-v2.txt"
+temperature = 0.0
 max_tokens = 128
 
-[rewriting.variants.qwen_t0]
-temperature = 0.0
-
-[rewriting.variants.qwen_t02]
+[queries.qwen_t02]
+kind = "rewrite"
+prompt = "src/mtrag/llm/templates/rewrite-v2.txt"
 temperature = 0.2
+max_tokens = 128
+
+[pipelines.bge_last]
+kind = "bge"
+query = "last"
+
+[pipelines.bge_t0]
+kind = "bge"
+query = "qwen_t0"
+
+[pipelines.bge_t02]
+kind = "bge"
+query = "qwen_t02"
+
+[pipelines.bge_gold]
+kind = "bge"
+query = "gold"
+
+[pipelines.elser_last]
+kind = "elser"
+query = "last"
+
+[pipelines.elser_t02]
+kind = "elser"
+query = "qwen_t02"
+
+[generators.qwen]
+prompt = "src/mtrag/llm/templates/generation-v1.txt"
+temperature = 0.1
+max_tokens = 512
+context_top_k = 5
+
+[generation.task_b]
+task = "b"
+generator = "qwen"
+contexts = "reference"
+evaluate = true
+
+[generation.task_c_bge_last]
+task = "c"
+generator = "qwen"
+contexts = "bge_last.dense"
+evaluate = true
+
+[generation.task_c_bge_t02]
+task = "c"
+generator = "qwen"
+contexts = "bge_t02.rrf_reranked"
+evaluate = true
+
+[generation.task_c_elser_last]
+task = "c"
+generator = "qwen"
+contexts = "elser_last.base"
+evaluate = true
+
+[generation.task_c_elser_t02]
+task = "c"
+generator = "qwen"
+contexts = "elser_t02.base"
+evaluate = true
+
+[schedules.bge]
+task_a = [
+    "bge_last.dense",
+    "bge_last.sparse",
+    "bge_last.rrf",
+    "bge_last.rrf_reranked",
+    "bge_t0.dense",
+    "bge_t0.sparse",
+    "bge_t0.rrf",
+    "bge_t0.rrf_reranked",
+    "bge_t02.dense",
+    "bge_t02.sparse",
+    "bge_t02.rrf",
+    "bge_t02.rrf_reranked",
+    "bge_gold.dense",
+]
+generation = []
+
+[schedules.elser]
+task_a = ["elser_last.base", "elser_t02.base", "elser_t02.reranked"]
+generation = []
+
+[schedules.task_b]
+task_a = []
+generation = ["task_b"]
+
+[schedules.bge_task_c]
+task_a = []
+generation = ["task_c_bge_last", "task_c_bge_t02"]
+
+[schedules.elser_task_c]
+task_a = []
+generation = ["task_c_elser_last", "task_c_elser_t02"]
 
 [retrieval]
+bge_index_revision = "kaggle-bge-m3-v1"
+elser_index_revision = "kaggle-elser-v1"
 dense_top_k = 50
 dense_candidate_multiplier = 10
 dense_rescore_oversample = 2.0
@@ -49,25 +154,15 @@ request_batch_size = 64
 input_top_k = 20
 output_top_k = 10
 task_batch_size = 32
-minimum_ndcg5_gain = 0.01
-minimum_improvement_probability = 0.95
-bootstrap_samples = 5000
-bootstrap_seed = 42
 
-[generation]
-context_top_k = 5
-max_tokens = 512
-temperature = 0.1
-run_algorithmic_metrics = true
+[evaluation]
 bertscore_model = "microsoft/deberta-xlarge-mnli"
 bertscore_batch_size = 1
 
 [thermal]
 gpu_pause = 86.0
 gpu_resume = 72.0
-gpu_abort = 86.0
 cpu_pause = 90.0
 cpu_resume = 80.0
-cpu_abort = 97.0
 poll_interval = 5.0
 resume_hold = 30.0

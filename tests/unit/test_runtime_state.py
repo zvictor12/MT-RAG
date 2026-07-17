@@ -7,7 +7,7 @@ from mtrag.runtime.state import StageStatus, StateStore
 
 
 class StateStoreTest(unittest.TestCase):
-    def test_resume_keeps_success_and_resets_interrupted_work(self) -> None:
+    def test_resume_reconsiders_every_active_stage(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir = Path(directory)
             first = StateStore(run_dir, ("done", "active"), resume=False)
@@ -19,7 +19,7 @@ class StateStoreTest(unittest.TestCase):
 
             self.assertEqual(
                 resumed.manifest.stages["done"].status,
-                StageStatus.SUCCEEDED,
+                StageStatus.PENDING,
             )
             self.assertEqual(
                 resumed.manifest.stages["active"].status,
@@ -31,8 +31,25 @@ class StateStoreTest(unittest.TestCase):
             persisted = json.loads(
                 (run_dir / "manifest.json").read_text(encoding="utf-8")
             )
-            self.assertEqual(persisted["stages"]["done"]["status"], "succeeded")
+            self.assertEqual(persisted["stages"]["done"]["status"], "pending")
             self.assertFalse(list(run_dir.glob(".manifest.json.*.tmp")))
+
+    def test_resume_preserves_stages_from_other_schedules(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory)
+            first = StateStore(run_dir, ("bge",), resume=False)
+            first.transition("bge", StageStatus.SUCCEEDED, return_code=0)
+
+            resumed = StateStore(run_dir, ("elser",), resume=True)
+
+            self.assertEqual(
+                resumed.manifest.stages["bge"].status,
+                StageStatus.SUCCEEDED,
+            )
+            self.assertEqual(
+                resumed.manifest.stages["elser"].status,
+                StageStatus.PENDING,
+            )
 
     def test_events_are_valid_append_only_jsonl(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

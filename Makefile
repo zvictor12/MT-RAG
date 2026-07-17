@@ -5,11 +5,12 @@ MODEL_ROOT ?= $(HOME)/.cache/mtrag/models
 BGE_REVISION := 5617a9f61b028005a4858fdac845db406aefb181
 RERANKER_REVISION := 953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e
 EXPERIMENT_CONFIG ?= configs/experiment.toml
-EXPERIMENT_PHASE ?= bge
+EXPERIMENT_SCHEDULE ?= bge
+LEGACY_IMPORT_FLAGS ?=
 RUN_DIR ?=
 RUN_DIR_ARG = $(if $(strip $(RUN_DIR)),--run-dir "$(RUN_DIR)",)
 
-.PHONY: sync sync-ml sync-evaluation sync-experiment diagnose infra-check es-up es-down es-logs es-setup elser-setup bge-restore models-bge models-reranker models smoke-bge smoke-reranker smoke-models ollama-enable ollama-pull ollama-smoke smoke-prompts ollama-unload smoke-search experiment-plan experiment-preflight experiment-run experiment-status experiment-results test
+.PHONY: sync sync-ml sync-evaluation sync-experiment diagnose infra-check es-up es-down es-logs es-setup elser-setup bge-restore models-bge models-reranker models smoke-bge smoke-reranker smoke-models ollama-enable ollama-pull ollama-smoke smoke-prompts ollama-unload smoke-search experiment-import-legacy experiment-plan experiment-preflight experiment-run experiment-status experiment-results test
 
 sync:
 	uv sync
@@ -80,17 +81,20 @@ ollama-unload:
 smoke-search:
 	uv run python scripts/smoke_search.py "What is cloud computing?"
 
+experiment-import-legacy:
+	uv run --extra ml python scripts/import_legacy_run.py --schedule "$(EXPERIMENT_SCHEDULE)" --config "$(EXPERIMENT_CONFIG)" $(RUN_DIR_ARG) $(LEGACY_IMPORT_FLAGS)
+
 experiment-plan:
-	uv run --extra ml --extra evaluation python scripts/run_experiment.py plan --phase "$(EXPERIMENT_PHASE)" --config "$(EXPERIMENT_CONFIG)" $(RUN_DIR_ARG)
+	uv run --extra ml --extra evaluation python scripts/run_experiment.py plan --schedule "$(EXPERIMENT_SCHEDULE)" --config "$(EXPERIMENT_CONFIG)" $(RUN_DIR_ARG)
 
 experiment-preflight:
-	uv run --extra ml --extra evaluation python scripts/run_experiment.py preflight --config "$(EXPERIMENT_CONFIG)" $(RUN_DIR_ARG)
+	uv run --extra ml --extra evaluation python scripts/run_experiment.py preflight --schedule "$(EXPERIMENT_SCHEDULE)" --config "$(EXPERIMENT_CONFIG)" $(RUN_DIR_ARG)
 
 experiment-run:
-	uv run --extra ml --extra evaluation python scripts/run_experiment.py run --phase "$(EXPERIMENT_PHASE)" --config "$(EXPERIMENT_CONFIG)" $(RUN_DIR_ARG)
+	uv run --extra ml --extra evaluation python scripts/run_experiment.py run --schedule "$(EXPERIMENT_SCHEDULE)" --config "$(EXPERIMENT_CONFIG)" $(RUN_DIR_ARG)
 
 experiment-status:
-	uv run --extra ml --extra evaluation python scripts/run_experiment.py status --config "$(EXPERIMENT_CONFIG)" $(RUN_DIR_ARG)
+	uv run --extra ml --extra evaluation python scripts/run_experiment.py status --schedule "$(EXPERIMENT_SCHEDULE)" --config "$(EXPERIMENT_CONFIG)" $(RUN_DIR_ARG)
 
 experiment-results:
 	uv run --extra ml --extra evaluation python scripts/run_experiment.py results --config "$(EXPERIMENT_CONFIG)" $(RUN_DIR_ARG)

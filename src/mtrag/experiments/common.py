@@ -13,12 +13,10 @@ def thermal_guard(config: ExperimentConfig) -> ThermalGuard:
         gpu=ThermalThresholds(
             config.thermal.gpu_pause,
             config.thermal.gpu_resume,
-            config.thermal.gpu_abort,
         ),
         cpu=ThermalThresholds(
             config.thermal.cpu_pause,
             config.thermal.cpu_resume,
-            config.thermal.cpu_abort,
         ),
         poll_interval=config.thermal.poll_interval,
         resume_hold=config.thermal.resume_hold,
@@ -36,6 +34,14 @@ def ollama_client(config: ExperimentConfig) -> OllamaClient:
         ollama_timeout=config.models.ollama_timeout,
     )
     return OllamaClient(client_settings)
+
+
+def ollama_identity(config: ExperimentConfig) -> str:
+    model = config.models
+    return (
+        f"{model.ollama_model}@{model.ollama_digest}:"
+        f"ctx={model.ollama_num_ctx}:seed={model.ollama_seed}"
+    )
 
 
 def chunks[T](values: list[T], size: int):

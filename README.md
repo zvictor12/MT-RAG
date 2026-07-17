@@ -97,7 +97,8 @@ make ollama-unload
 
 Текущий Ollama digest закреплён в `configs/experiment.toml`. Если повторный
 `ollama pull` обновил тег, preflight покажет оба digest; обновляйте значение
-осознанно и используйте новый `RUN_DIR`, чтобы не смешать ответы разных весов.
+осознанно. Новые ответы получат отдельную fingerprint-ревизию внутри того же
+`RUN_DIR`, поэтому старые результаты не перезаписываются.
 
 ## 4. Elasticsearch
 
@@ -167,8 +168,9 @@ make smoke-search
 
 ## 7. Эксперимент
 
-Единственный источник параметров — `configs/experiment.toml`. До полного
-прогона просмотрите DAG, затем запустите его:
+Единственный источник параметров — `configs/experiment.toml`. В нём явно
+описаны запросы (`queries`), retrieval-рецепты (`pipelines`), generation jobs
+и именованные очереди (`schedules`). До запуска просмотрите построенный DAG:
 
 ```bash
 make sync-experiment
@@ -179,8 +181,15 @@ make experiment-status
 make experiment-results
 ```
 
-По умолчанию состояние и результаты лежат в `runs/main`. Для независимого
-прогона используйте новый каталог во всех трёх командах:
+По умолчанию запускается `schedules.bge`, состояние и результаты лежат в
+`runs/main`. Другую очередь выбираем без изменения Python-кода:
+
+```bash
+make experiment-plan EXPERIMENT_SCHEDULE=elser
+make experiment-run EXPERIMENT_SCHEDULE=elser
+```
+
+Для полностью независимой кампании используйте новый каталог:
 
 ```bash
 make experiment-plan RUN_DIR=runs/pilot-01
@@ -188,27 +197,33 @@ make experiment-run RUN_DIR=runs/pilot-01
 make experiment-status RUN_DIR=runs/pilot-01
 ```
 
-Фаза `bge` сравнивает одинаковым контуром варианты `last`, `qwen_t0`
-(`temperature=0.0`) и `qwen_t02` (`temperature=0.2`): BGE dense, sparse, RRF
-и RRF с reranker. Отдельный `gold` остаётся oracle baseline. Reranker считается
-полезным для варианта только при приросте
-`nDCG@5 >= 0.01` и paired-bootstrap probability of improvement `>= 0.95`.
-Запросы первого turn копируются без изменений; Qwen вызывается только когда
-у вопроса уже есть история разговора.
-Победитель rewrite выбирается по BGE-dense, а общий BGE-победитель — между
-dense, sparse, RRF и прошедшими gate reranked-вариантами. `Task C (last)`
-сохраняется отдельно как baseline; ещё один Task C строится только для
-выбранного BGE-контура. Task B использует эталонные контексты.
+`schedules.bge` сейчас считает явно перечисленные `last`, `qwen_t0`,
+`qwen_t02` и `gold` outputs. Dense, sparse, RRF и reranked — независимые
+эксперименты: код ничего не объявляет победителем и не включает/выключает
+reranker по скрытому gate. После Task A нужный контекст для Task C выбирается
+прямой ссылкой вроде `contexts = "bge_t02.rrf_reranked"` в TOML.
+Запросы первого turn копируются без изменений; Qwen вызывается только при
+наличии истории.
 
-После восстановления ELSER продолжите тот же run расширенной фазой:
+Task B/C не стартуют автоматически вслед за retrieval. После просмотра Task A
+запускайте нужную очередь явно:
 
 ```bash
-make experiment-run RUN_DIR=runs/main EXPERIMENT_PHASE=full
+make experiment-run EXPERIMENT_SCHEDULE=task_b
+make experiment-run EXPERIMENT_SCHEDULE=bge_task_c
+# после восстановления ELSER:
+make experiment-run EXPERIMENT_SCHEDULE=elser_task_c
 ```
 
-ELSER получает выбранный rewrite-вариант. Если BGE подтвердил пользу reranker,
-финальный выбор всё равно сравнивает и базовый, и reranked ELSER с BGE, поэтому
-ухудшивший ELSER reranker не становится обязательным.
+После восстановления ELSER продолжите тот же campaign directory:
+
+```bash
+make experiment-run RUN_DIR=runs/main EXPERIMENT_SCHEDULE=elser
+```
+
+Чтобы добавить третью температуру или другой prompt, добавьте новую
+`[queries.<name>]`, pipeline и ссылки в schedule. Никакой Python менять не
+нужно.
 
 Dense-поиск здесь использует восстановленный Elasticsearch `int8_hnsw` с
 `num_candidates = max(100, top_k * dense_candidate_multiplier)`, по умолчанию
@@ -217,63 +232,78 @@ Dense-поиск здесь использует восстановленный 
 не точное воспроизведение paper baseline на FAISS `IndexFlatIP`;
 нормализованные BGE-M3 векторы и `dot_product` при этом семантически совместимы.
 
-Прогон возобновляемый. `manifest.json`, `events.jsonl`, stage-логи, SQLite
-cache, дописываемые JSONL checkpoints, predictions, метрики и решения лежат
-внутри `RUN_DIR`. Повторный `experiment-run` пропускает успешные стадии и
-продолжает прерванные. Первый `Ctrl-C` корректно останавливает дочерние
-процессы и сохраняет статус, второй завершает их принудительно.
-Параметры эксперимента, включая температуры rewrite-вариантов, и версии обоих промптов фиксируются в
-`run-definition.json`; если они изменились, resume просит новый `RUN_DIR`.
-Секция `[thermal]` исключена из checksum: её можно менять во время run.
+Прогон возобновляемый. Глобальной блокировки `run-definition.json` больше нет.
+Fingerprint применяется локально как адрес конкретного артефакта: он включает
+только его prompt/model/temperature и upstream inputs. Поэтому изменение
+`qwen_t02` создаёт новую ревизию этого эксперимента, но `bge_last` остаётся
+переиспользуемым. Результаты лежат в читаемой структуре
+`experiments/<pipeline>/<output>/<fingerprint>/` и
+`generation/<job>/<fingerprint>/`.
+Поля `retrieval.bge_index_revision` и `retrieval.elser_index_revision` — явные
+версии содержимого Elasticsearch; меняйте соответствующее значение после
+замены восстановленного индекса.
 
-`candidates/*.jsonl` сохраняют текст, title, исходные scores и компоненты RRF
-для reranker/Task C. `predictions/task_a/*.jsonl` намеренно компактны: только
-обязательные `document_id` и rank-preserving `score`, чтобы уложиться в
-официальный лимит 20 МБ.
+Для старого плоского `runs/main` есть однократный импорт. По умолчанию команда
+только показывает инвентарь и ничего не помечает завершённым:
+
+```bash
+make experiment-import-legacy RUN_DIR=runs/main EXPERIMENT_SCHEDULE=bge
+```
+
+Если старые файлы точно созданы теми же prompt, моделями и параметрами, их можно
+скопировать в текущие content-addressed ревизии явным opt-in. Перед completion
+marker импорт проверяет полный набор `task_id` и контрольные суммы:
+
+```bash
+make experiment-import-legacy RUN_DIR=runs/main EXPERIMENT_SCHEDULE=bge \
+  LEGACY_IMPORT_FLAGS=--trust-current-definition
+```
+
+Hardlink не используется: старый файл и новая ревизия не могут случайно изменить
+друг друга. Task A метрики намеренно пересчитываются официальным IBM evaluator.
 
 Scheduler допускает только одну GPU-стадию, но параллелит независимую CPU/ES
 работу в пределах `run.cpu_slots`. На границах стадий и model batches действует
-thermal guard. Два подряд измерения GPU `>=80°C` или CPU `>=90°C` ставят работу
+thermal guard. Два подряд измерения GPU `>=86°C` или CPU `>=90°C` ставят работу
 на паузу; продолжение происходит после `<=72°C`/`<=80°C` в течение 30 секунд.
-Верхние значения не завершают прогон: работа остаётся на паузе до охлаждения.
+Перегрев не завершает прогон: работа остаётся на паузе до охлаждения.
 Если датчик недоступен, в лог пишется предупреждение и защита только для этого
 датчика отключается.
 
-Task B/C algorithmic evaluation по умолчанию включена
-(`generation.run_algorithmic_metrics=true`) и запускается после выгрузки
-Qwen. Чтобы сначала только сохранить ответы и отложить тяжёлый BERTScore,
-выключите её в TOML до запуска нового `RUN_DIR`.
+Для одного `RUN_DIR` запускайте один scheduler: lock защищает manifest и cache
+от двух конкурирующих процессов. Параллельные варианты перечисляйте внутри
+одного schedule — scheduler сам распределит CPU/ES и GPU stages.
+
+Task B/C evaluation включается отдельно для каждого job полем
+`evaluate = true`. Его можно временно поставить в `false`, не меняя retrieval
+артефакты. Внутри одного schedule сначала выполняются все Qwen generation jobs,
+затем Ollama выгружается и все jobs оцениваются одной загрузкой DeBERTa.
 
 ## 8. Промпты и воспроизводимость
 
-Оба исследовательских промпта находятся в
-`src/mtrag/llm/prompts.py`: `_REWRITE_SYSTEM_PROMPT` строит самостоятельный
-поисковый запрос, `_GENERATOR_SYSTEM_PROMPT` формирует grounded-ответ по
-пассажам. Температуры rewriter заданы в `rewriting.variants`, а generator —
-в `generation.temperature` из `configs/experiment.toml` (сейчас `0.1`).
+Тексты промптов находятся в `src/mtrag/llm/templates/`. Каждый query и
+generator ссылается на свой файл и задаёт температуру непосредственно в
+`configs/experiment.toml`.
 `think=false` задаётся в `src/mtrag/llm/ollama_client.py`, а воспроизводимый
 `seed` — в `configs/experiment.toml`.
 
-При изменении промпта увеличьте рядом соответствующий
-`REWRITE_PROMPT_VERSION` или `GENERATOR_PROMPT_VERSION`. Версия входит в ключ
-SQLite cache, поэтому старые ответы не будут незаметно переиспользованы в новом
-прогоне.
+Содержимое prompt входит и в SQLite cache key, и в fingerprint артефакта;
+ручной номер версии увеличивать не нужно.
 
 ## 9. Оценка
 
-Для Task A используется встроенный evaluator: он считает nDCG и Recall на
-`1/3/5/10`, включает отсутствующие predictions как нули и умеет выпустить
-IBM-совместимый enriched JSONL и aggregate CSV:
+Для Task A тонкий адаптер вызывает `prepare_results_dict`, `load_qrels` и
+`evaluate` непосредственно из соседнего `mt-rag-benchmark`. Локальной копии
+формул nDCG/Recall нет:
 
 ```bash
-uv run python scripts/evaluate_retrieval.py \
+uv run --extra evaluation python scripts/evaluate_retrieval.py \
   --input path/to/retrieval.jsonl \
   --benchmark-root ../mt-rag-benchmark \
-  --output path/to/retrieval-report.json \
-  --official-output path/to/retrieval-evaluated.jsonl
+  --output path/to/retrieval-report.json
 ```
 
-Для Task B/C выбран алгоритмический набор метрик из IBM evaluator: Recall,
+Для Task B/C также вызывается официальный `run_algorithmic_judges`: Recall,
 RougeL, BERTScore, BertKPrec, extractiveness и RB-agg. BERTScore пары считаются
 батчами одной загруженной
 [microsoft/deberta-xlarge-mnli](https://huggingface.co/microsoft/deberta-xlarge-mnli),

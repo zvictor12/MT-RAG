@@ -1,8 +1,13 @@
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
-from mtrag.experiments.preflight import _require_files, _validate_bge_mapping
+from mtrag.experiments.preflight import (
+    _require_files,
+    _validate_bge_mapping,
+    requirements_for,
+)
 
 
 class ExperimentPreflightTest(unittest.TestCase):
@@ -34,6 +39,34 @@ class ExperimentPreflightTest(unittest.TestCase):
         mapping[index]["mappings"]["properties"]["embedding"]["dims"] = 768
         with self.assertRaisesRegex(RuntimeError, "incompatible mapping"):
             _validate_bge_mapping(index, mapping)
+
+    def test_requirements_are_derived_from_the_selected_schedule(self) -> None:
+        bge = requirements_for(
+            (
+                SimpleNamespace(kind="encode", params={}),
+                SimpleNamespace(kind="retrieve", params={"method": "dense"}),
+            )
+        )
+        elser = requirements_for(
+            (
+                SimpleNamespace(
+                    kind="retrieve",
+                    params={"method": "elser"},
+                ),
+            )
+        )
+
+        self.assertTrue(bge.bge_model)
+        self.assertTrue(bge.cuda)
+        self.assertEqual(bge.bge_modes, {"dense"})
+        self.assertFalse(bge.elser)
+        self.assertFalse(bge.reranker)
+        self.assertFalse(bge.ollama)
+
+        self.assertTrue(elser.elser)
+        self.assertFalse(elser.bge_model)
+        self.assertFalse(elser.bge_modes)
+        self.assertFalse(elser.cuda)
 
 
 if __name__ == "__main__":

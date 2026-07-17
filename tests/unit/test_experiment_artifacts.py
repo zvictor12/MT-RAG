@@ -6,7 +6,6 @@ from pathlib import Path
 from mtrag.experiments.artifacts import (
     JsonlCheckpoint,
     RunArtifacts,
-    lock_run_definition,
     materialize_prediction,
     ranking_record,
     read_jsonl,
@@ -65,6 +64,8 @@ class JsonlCheckpointTest(unittest.TestCase):
 
 
 class ArtifactMappingTest(unittest.TestCase):
+    revision = "a" * 64
+
     def test_ranking_round_trip_keeps_raw_score_and_rank(self) -> None:
         task = BenchmarkTask(
             task_id="q<::>1",
@@ -89,30 +90,27 @@ class ArtifactMappingTest(unittest.TestCase):
         self.assertEqual(record["contexts"][0]["score"], 1.0)
         self.assertEqual(restored, [hit])
 
-    def test_run_artifacts_separates_candidates_and_official_predictions(self) -> None:
+    def test_run_artifacts_separates_named_experiment_revisions(self) -> None:
         paths = RunArtifacts(Path("run"))
-        self.assertEqual(paths.candidates("dense"), Path("run/candidates/dense.jsonl"))
         self.assertEqual(
-            paths.prediction("dense"),
-            Path("run/predictions/task_a/dense.jsonl"),
+            paths.candidates("bge_last.dense", self.revision),
+            Path(
+                "run/experiments/bge_last/dense/"
+                f"{self.revision}/candidates.jsonl"
+            ),
         )
         self.assertEqual(
-            paths.bge_winner,
-            Path("run/decisions/bge-winner.json"),
-        )
-        self.assertEqual(
-            paths.generation("c_bge"),
-            Path("run/predictions/task_c_bge.jsonl"),
+            paths.generation("answer", self.revision),
+            Path(f"run/generation/answer/{self.revision}/predictions.jsonl"),
         )
 
-    def test_run_definition_cannot_change_during_resume(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "definition.json"
-            lock_run_definition(path, {"config": "one", "prompt": "v1"})
-            lock_run_definition(path, {"config": "one", "prompt": "v1"})
+    def test_artifact_revision_must_be_a_full_fingerprint(self) -> None:
+        with self.assertRaisesRegex(ValueError, "fingerprint"):
+            RunArtifacts(Path("run")).candidates("bge_last.dense", "latest")
 
-            with self.assertRaisesRegex(RuntimeError, "new --run-dir"):
-                lock_run_definition(path, {"config": "two", "prompt": "v1"})
+    def test_artifact_name_must_not_be_absolute(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unsafe artifact name"):
+            RunArtifacts(Path("run")).rewrite("/tmp/escape", self.revision)
 
     def test_official_prediction_fills_tasks_without_a_query_variant(self) -> None:
         tasks = [

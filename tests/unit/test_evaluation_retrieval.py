@@ -1,88 +1,134 @@
-import json
-import math
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import ModuleType
+from unittest.mock import patch
 
-from mtrag.evaluation.retrieval import (
-    evaluate_retrieval,
-    load_rankings_jsonl,
-    rank_document_ids,
-    score_query,
-)
+from mtrag.evaluation.ibm import load_ibm_module
+from mtrag.evaluation.retrieval import evaluate_retrieval
+
+
+CLAPNQ = "mt-rag-clapnq-elser-512-100-20240503"
+CLOUD = "mt-rag-ibmcloud-elser-512-100-20240502"
+
+
+def metric_scores(query_id: str, value: float, cutoffs: list[int]) -> dict:
+    return {
+        query_id: {
+            **{f"ndcg_cut_{cutoff}": value for cutoff in cutoffs},
+            **{f"recall_{cutoff}": value / 2 for cutoff in cutoffs},
+        }
+    }
+
+
+class FakeOfficialEvaluator:
+    def __init__(self) -> None:
+        self.qrels_paths: list[Path] = []
+        self.evaluated: list[tuple[dict, list[int]]] = []
+
+    def prepare_results_dict(self, path: str):
+        self.prediction_path = Path(path)
+        return (
+            {
+                "clap-q": {"d1": 1.0},
+                "clap-extra-1": {"d2": 1.0},
+                "clap-extra-2": {"d3": 1.0},
+                "cloud-q": {"d4": 1.0},
+            },
+            {
+                "clap-q": CLAPNQ,
+                "clap-extra-1": CLAPNQ,
+                "clap-extra-2": CLAPNQ,
+                "cloud-q": CLOUD,
+            },
+        )
+
+    def load_qrels(self, path: str):
+        qrels_path = Path(path)
+        self.qrels_paths.append(qrels_path)
+        return {"domain": qrels_path.parts[-3]}
+
+    def evaluate(self, qrels: dict, results: dict, cutoffs: list[int]):
+        self.evaluated.append((results, cutoffs))
+        domain = qrels["domain"]
+        value = 0.2 if domain == "clapnq" else 0.8
+        query_id = "clap-q" if domain == "clapnq" else "cloud-q"
+        return (
+            metric_scores(query_id, value, cutoffs),
+            {f"NDCG@{cutoff}": value for cutoff in cutoffs},
+            {},
+            {f"Recall@{cutoff}": value / 2 for cutoff in cutoffs},
+            {},
+        )
 
 
 class RetrievalEvaluationTest(unittest.TestCase):
-    def test_query_metrics(self) -> None:
-        metrics = score_query(
-            {"d1": 1, "d2": 1},
-            ["noise", "d1"],
-            cutoffs=(1, 3),
-        )
-        expected_ndcg = (1 / math.log2(3)) / (
-            1 + 1 / math.log2(3)
-        )
-        self.assertEqual(metrics.ndcg[1], 0.0)
-        self.assertAlmostEqual(metrics.ndcg[3], expected_ndcg)
-        self.assertEqual(metrics.recall[1], 0.0)
-        self.assertEqual(metrics.recall[3], 0.5)
-
-    def test_missing_queries_are_zero_and_global_is_qrels_weighted(self) -> None:
-        qrels = {
-            "clapnq": {
-                "q1<::>1": {"d1": 1},
-                "q2<::>1": {"d2": 1},
-            },
-            "cloud": {"q3<::>1": {"d3": 1}},
-        }
-        rankings = {
-            "clapnq": {"q1::1": ["d1"]},
-            "cloud": {"q3::1": ["d3"]},
-        }
-        report = evaluate_retrieval(qrels, rankings, cutoffs=(1,))
-
-        self.assertEqual(report.query_count, 3)
-        self.assertEqual(report.domains["clapnq"].query_count, 2)
-        self.assertEqual(report.domains["clapnq"].metrics.ndcg[1], 0.5)
-        self.assertEqual(report.metrics.ndcg[1], 2 / 3)
-        self.assertEqual(report.metrics.recall[1], 2 / 3)
-
-    def test_score_ties_have_deterministic_document_id_order(self) -> None:
-        self.assertEqual(
-            rank_document_ids({"b": 1.0, "a": 1.0}),
-            ["a", "b"],
-        )
-        report = evaluate_retrieval(
-            {"fiqa": {"q<::>1": {"a": 1}}},
-            {"fiqa": {"q::1": {"b": 1.0, "a": 1.0}}},
-            cutoffs=(1,),
-        )
-        self.assertEqual(report.metrics.ndcg[1], 1.0)
-
-    def test_ordered_rankings_are_deduplicated(self) -> None:
-        self.assertEqual(rank_document_ids(["a", "a", "b"]), ["a", "b"])
-
-    def test_load_official_jsonl(self) -> None:
+    def test_uses_ibm_functions_and_official_prediction_weighting(self) -> None:
+        official = FakeOfficialEvaluator()
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "predictions.jsonl"
-            path.write_text(
-                json.dumps(
-                    {
-                        "task_id": "q::1",
-                        "Collection": "mt-rag-ibmcloud-elser-512-100-20240502",
-                        "contexts": [
-                            {"document_id": "d1", "score": 2.0},
-                            {"document_id": "d2", "score": 1.0},
-                        ],
-                    }
-                )
-                + "\n",
+            root = Path(directory) / "benchmark"
+            prediction = Path(directory) / "task-a.jsonl"
+            with patch(
+                "mtrag.evaluation.retrieval.load_ibm_module",
+                return_value=official,
+            ):
+                report = evaluate_retrieval(root, prediction)
+
+        self.assertEqual(official.prediction_path, prediction)
+        self.assertEqual(
+            official.qrels_paths,
+            [
+                root
+                / "mtrag-human/retrieval_tasks/clapnq/qrels/dev.tsv",
+                root
+                / "mtrag-human/retrieval_tasks/cloud/qrels/dev.tsv",
+            ],
+        )
+        self.assertEqual(len(official.evaluated), 2)
+        self.assertTrue(
+            all(cutoffs == [1, 3, 5, 10] for _, cutoffs in official.evaluated)
+        )
+        self.assertEqual(report.query_count, 2)
+        self.assertEqual(report.domains["clapnq"].query_count, 1)
+        self.assertEqual(report.domains["clapnq"].metrics.ndcg[5], 0.2)
+        self.assertEqual(report.domains["cloud"].query_count, 1)
+
+        # IBM weights domain means by prediction count: (0.2 * 3 + 0.8) / 4.
+        self.assertAlmostEqual(report.metrics.ndcg[5], 0.35)
+        self.assertAlmostEqual(report.metrics.recall[5], 0.175)
+
+    def test_loader_executes_a_script_from_the_benchmark_repository(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scripts = root / "scripts" / "evaluation"
+            scripts.mkdir(parents=True)
+            (scripts / "sentinel.py").write_text("VALUE = 42\n", encoding="utf-8")
+
+            module = load_ibm_module(root, "sentinel.py")
+
+        self.assertEqual(module.VALUE, 42)
+
+    def test_loader_temporarily_overrides_an_upstream_dependency(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scripts = root / "scripts" / "evaluation"
+            scripts.mkdir(parents=True)
+            (scripts / "sentinel.py").write_text(
+                "import external_metric\nVALUE = external_metric.VALUE\n",
                 encoding="utf-8",
             )
-            self.assertEqual(
-                load_rankings_jsonl(path),
-                {"cloud": {"q<::>1": {"d1": 2.0, "d2": 1.0}}},
+            dependency = ModuleType("external_metric")
+            dependency.VALUE = 7
+
+            module = load_ibm_module(
+                root,
+                "sentinel.py",
+                module_overrides={"external_metric": dependency},
             )
+
+        self.assertEqual(module.VALUE, 7)
+        self.assertNotIn("external_metric", sys.modules)
 
 
 if __name__ == "__main__":

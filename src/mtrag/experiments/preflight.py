@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import requests
 
@@ -40,11 +41,61 @@ def _get_json(url: str, path: str, *, timeout: int = 15) -> Any:
     return response.json()
 
 
-def _bge_indices() -> set[str]:
+class StageLike(Protocol):
+    kind: str
+    params: Mapping[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class PreflightRequirements:
+    generation_tasks: bool
+    bge_model: bool
+    reranker: bool
+    ollama: bool
+    cuda: bool
+    bge_modes: frozenset[str]
+    elser: bool
+
+
+def requirements_for(
+    stages: Iterable[StageLike] | None,
+) -> PreflightRequirements:
+    if stages is None:
+        return PreflightRequirements(
+            generation_tasks=True,
+            bge_model=True,
+            reranker=True,
+            ollama=True,
+            cuda=True,
+            bge_modes=frozenset(("dense", "sparse")),
+            elser=True,
+        )
+
+    planned = tuple(stages)
+    kinds = {stage.kind for stage in planned}
+    methods = {
+        str(stage.params.get("method"))
+        for stage in planned
+        if stage.kind == "retrieve"
+    }
+    return PreflightRequirements(
+        generation_tasks=bool(planned),
+        bge_model="encode" in kinds,
+        reranker="rerank" in kinds,
+        ollama=bool(kinds & {"rewrite", "generate"}),
+        cuda=bool(
+            kinds & {"encode", "rerank", "evaluate_generation_batch"}
+        ),
+        bge_modes=frozenset(methods & {"dense", "sparse"}),
+        elser="elser" in methods,
+    )
+
+
+def _bge_indices(modes: Iterable[str]) -> set[str]:
     return {
         f"mtrag-{domain}-bge-m3-{mode}"
         for domain in DOMAINS
-        for mode in ("dense", "sparse")
+        for mode in modes
     }
 
 
@@ -73,7 +124,12 @@ def _validate_bge_mapping(index: str, mapping: Mapping[str, Any]) -> None:
             )
 
 
-def _check_elasticsearch(config: ExperimentConfig) -> tuple[str, bool]:
+def _check_elasticsearch(
+    config: ExperimentConfig,
+    *,
+    bge_modes: frozenset[str],
+    elser: bool,
+) -> str:
     url = config.services.elasticsearch_url
     info = _get_json(url, "")
     rows = _get_json(
@@ -82,7 +138,9 @@ def _check_elasticsearch(config: ExperimentConfig) -> tuple[str, bool]:
     )
     counts = {row["index"]: int(row["docs.count"]) for row in rows}
 
-    required = _bge_indices()
+    required = _bge_indices(bge_modes)
+    if elser:
+        required.update(f"mtrag-{domain}-elser" for domain in DOMAINS)
     missing = sorted(required - counts.keys())
     empty = sorted(index for index in required if counts.get(index, 0) <= 0)
     if missing or empty:
@@ -91,28 +149,27 @@ def _check_elasticsearch(config: ExperimentConfig) -> tuple[str, bool]:
             details.append(f"missing={missing}")
         if empty:
             details.append(f"empty={empty}")
-        raise RuntimeError("BGE Elasticsearch indices are not ready: " + "; ".join(details))
+        raise RuntimeError("Elasticsearch indices are not ready: " + "; ".join(details))
 
-    mapping = _get_json(url, "/mtrag-*-bge-m3-*/_mapping")
-    for index in sorted(required):
-        _validate_bge_mapping(index, mapping)
-    for domain in DOMAINS:
-        dense = counts[f"mtrag-{domain}-bge-m3-dense"]
-        sparse = counts[f"mtrag-{domain}-bge-m3-sparse"]
-        if dense != sparse:
-            raise RuntimeError(
-                f"BGE index counts differ for {domain}: dense={dense}, sparse={sparse}"
-            )
+    bge_indices = _bge_indices(bge_modes)
+    if bge_indices:
+        mapping = _get_json(url, "/mtrag-*-bge-m3-*/_mapping")
+        for index in sorted(bge_indices):
+            _validate_bge_mapping(index, mapping)
+    if bge_modes == {"dense", "sparse"}:
+        for domain in DOMAINS:
+            dense = counts[f"mtrag-{domain}-bge-m3-dense"]
+            sparse = counts[f"mtrag-{domain}-bge-m3-sparse"]
+            if dense != sparse:
+                raise RuntimeError(
+                    f"BGE index counts differ for {domain}: "
+                    f"dense={dense}, sparse={sparse}"
+                )
 
-    elser_indices = {f"mtrag-{domain}-elser" for domain in DOMAINS}
-    elser_ready = elser_indices.issubset(counts)
-    return str(info["version"]["number"]), elser_ready
+    return str(info["version"]["number"])
 
 
 def _check_elser_endpoint(config: ExperimentConfig) -> bool:
-    # The restored semantic_text mapping expects the endpoint name from .env.
-    # It is intentionally a warning here: the independent BGE branch can run
-    # while a still-running Kaggle ELSER snapshot is being downloaded.
     try:
         response = requests.get(
             (
@@ -136,7 +193,13 @@ def _check_cuda() -> str:
     return torch.cuda.get_device_name(0)
 
 
-def preflight(config: ExperimentConfig, artifacts: RunArtifacts) -> None:
+def preflight(
+    config: ExperimentConfig,
+    artifacts: RunArtifacts,
+    *,
+    stages: Iterable[StageLike] | None = None,
+) -> None:
+    required = requirements_for(stages)
     artifacts.create_directories()
     generation_tasks = (
         config.run.benchmark_root
@@ -144,36 +207,48 @@ def preflight(config: ExperimentConfig, artifacts: RunArtifacts) -> None:
         / "generation_tasks"
         / "reference.jsonl"
     )
-    if not generation_tasks.is_file():
+    if required.generation_tasks and not generation_tasks.is_file():
         raise RuntimeError(f"benchmark is missing: {generation_tasks}")
 
-    _require_files("BGE-M3", config.models.bge_path, _BGE_FILES)
-    _require_files("reranker", config.models.reranker_path, _RERANKER_FILES)
-    device = _check_cuda()
-    elasticsearch_version, elser_indices_ready = _check_elasticsearch(config)
-    elser_endpoint_ready = _check_elser_endpoint(config)
-
-    client = ollama_client(config)
-    installed = client.installed_model_digests()
-    if config.models.ollama_model not in installed:
+    ready = ["benchmark"]
+    if required.bge_model:
+        _require_files("BGE-M3", config.models.bge_path, _BGE_FILES)
+        ready.append("BGE-M3")
+    if required.reranker:
+        _require_files("reranker", config.models.reranker_path, _RERANKER_FILES)
+        ready.append("reranker")
+    if required.cuda:
+        ready.append(_check_cuda())
+    if required.bge_modes or required.elser:
+        version = _check_elasticsearch(
+            config,
+            bge_modes=required.bge_modes,
+            elser=required.elser,
+        )
+        ready.append(f"Elasticsearch {version}")
+        if required.bge_modes:
+            ready.append(f"BGE index {config.retrieval.bge_index_revision}")
+    if required.elser and not _check_elser_endpoint(config):
         raise RuntimeError(
-            f"Ollama model {config.models.ollama_model!r} is not installed"
+            f"ELSER inference endpoint {config.services.elser_inference_id!r} "
+            "is not ready"
         )
-    actual_digest = installed[config.models.ollama_model]
-    if config.models.ollama_digest and actual_digest != config.models.ollama_digest:
-        raise RuntimeError(
-            f"Ollama digest changed for {config.models.ollama_model}: "
-            f"expected {config.models.ollama_digest}, got {actual_digest}"
-        )
+    if required.elser:
+        ready.append(f"ELSER index {config.retrieval.elser_index_revision}")
 
-    print(
-        f"ready: benchmark, Elasticsearch {elasticsearch_version}, "
-        f"{config.models.ollama_model}, BGE-M3, reranker, {device}",
-        flush=True,
-    )
-    if not (elser_indices_ready and elser_endpoint_ready):
-        print(
-            "warning: ELSER is not ready; run the BGE phase now, then extend "
-            "the same run with the full phase after `make elser-setup`",
-            flush=True,
-        )
+    if required.ollama:
+        client = ollama_client(config)
+        installed = client.installed_model_digests()
+        if config.models.ollama_model not in installed:
+            raise RuntimeError(
+                f"Ollama model {config.models.ollama_model!r} is not installed"
+            )
+        actual_digest = installed[config.models.ollama_model]
+        if config.models.ollama_digest and actual_digest != config.models.ollama_digest:
+            raise RuntimeError(
+                f"Ollama digest changed for {config.models.ollama_model}: "
+                f"expected {config.models.ollama_digest}, got {actual_digest}"
+            )
+        ready.append(config.models.ollama_model)
+
+    print(f"ready: {', '.join(ready)}", flush=True)

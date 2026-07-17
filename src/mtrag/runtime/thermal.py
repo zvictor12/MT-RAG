@@ -17,8 +17,6 @@ TemperatureReader = Callable[[], float | None]
 class ThermalThresholds:
     pause: float
     resume: float
-    # Kept for compatibility with an active run config; no abort is performed.
-    abort: float
 
     def __post_init__(self) -> None:
         if not self.resume < self.pause:
@@ -138,8 +136,8 @@ class ThermalGuard:
     def __init__(
         self,
         *,
-        gpu: ThermalThresholds = ThermalThresholds(80.0, 72.0, 86.0),
-        cpu: ThermalThresholds = ThermalThresholds(90.0, 80.0, 97.0),
+        gpu: ThermalThresholds = ThermalThresholds(80.0, 72.0),
+        cpu: ThermalThresholds = ThermalThresholds(90.0, 80.0),
         poll_interval: float = 5.0,
         resume_hold: float = 30.0,
         hot_samples: int = 1,
