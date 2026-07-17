@@ -1,0 +1,102 @@
+{"timestamp":"2026-07-17T00:19:44.876214+00:00","event":"run_created","details":{"stage_count":13}}
+{"timestamp":"2026-07-17T00:19:44.880706+00:00","event":"scheduler_started"}
+{"timestamp":"2026-07-17T00:19:44.891674+00:00","event":"stage_running","stage":"preflight","details":{"attempt":1,"return_code":null,"error":null}}
+{"timestamp":"2026-07-17T00:19:44.900961+00:00","event":"stage_process_started","stage":"preflight","details":{"pid":69472}}
+{"timestamp":"2026-07-17T00:19:46.221026+00:00","event":"stage_succeeded","stage":"preflight","details":{"attempt":1,"return_code":0,"error":null}}
+{"timestamp":"2026-07-17T00:19:46.259476+00:00","event":"stage_running","stage":"rewrite_qwen","details":{"attempt":1,"return_code":null,"error":null}}
+{"timestamp":"2026-07-17T00:19:46.270693+00:00","event":"stage_process_started","stage":"rewrite_qwen","details":{"pid":69517}}
+{"timestamp":"2026-07-17T00:24:17.810289+00:00","event":"stage_failed","stage":"rewrite_qwen","details":{"attempt":1,"return_code":1,"error":"command exited with status 1"}}
+{"timestamp":"2026-07-17T00:24:17.818457+00:00","event":"stage_blocked","stage":"encode_bge","details":{"attempt":0,"return_code":null,"error":"a dependency failed"}}
+{"timestamp":"2026-07-17T00:24:17.826346+00:00","event":"stage_blocked","stage":"retrieve_bge","details":{"attempt":0,"return_code":null,"error":"a dependency failed"}}
+{"timestamp":"2026-07-17T00:24:17.834167+00:00","event":"stage_blocked","stage":"fuse_bge","details":{"attempt":0,"return_code":null,"error":"a dependency failed"}}
+{"timestamp":"2026-07-17T00:24:17.842289+00:00","event":"stage_blocked","stage":"evaluate_bge_base","details":{"attempt":0,"return_code":null,"error":"a dependency failed"}}
+{"timestamp":"2026-07-17T00:24:17.850612+00:00","event":"stage_blocked","stage":"rerank_bge","details":{"attempt":0,"return_code":null,"error":"a dependency failed"}}
+{"timestamp":"2026-07-17T00:24:17.858928+00:00","event":"stage_blocked","stage":"evaluate_bge_rerank","details":{"attempt":0,"return_code":null,"error":"a dependency failed"}}
+{"timestamp":"2026-07-17T00:24:17.867446+00:00","event":"stage_blocked","stage":"decide_reranker","details":{"attempt":0,"return_code":null,"error":"a dependency failed"}}
+{"timestamp":"2026-07-17T00:24:17.875652+00:00","event":"stage_blocked","stage":"select_bge","details":{"attempt":0,"return_code":null,"error":"a dependency failed"}}
+{"timestamp":"2026-07-17T00:24:17.884236+00:00","event":"stage_blocked","stage":"generate_task_b","details":{"attempt":0,"return_code":null,"error":"a dependency failed"}}
+{"timestamp":"2026-07-17T00:24:17.892690+00:00","event":"stage_blocked","stage":"generate_task_c_bge","details":{"attempt":0,"return_code":null,"error":"a dependency failed"}}
+{"timestamp":"2026-07-17T00:24:17.900967+00:00","event":"stage_blocked","stage":"evaluate_generation_bge","details":{"attempt":0,"return_code":null,"error":"a dependency failed"}}
+{"timestamp":"2026-07-17T00:24:17.905197+00:00","event":"scheduler_stopped","details":{"complete":false,"stop_requested":false}}
+{"timestamp":"2026-07-17T00:32:06.564472+00:00","event":"run_resumed","details":{"reset_stages":["rewrite_qwen","encode_bge","retrieve_bge","fuse_bge","evaluate_bge_base","rerank_bge","evaluate_bge_rerank","decide_reranker","select_bge","generate_task_b","generate_task_c_bge","evaluate_generation_bge"]}}
+{"timestamp":"2026-07-17T00:32:06.569320+00:00","event":"scheduler_started"}
+{"timestamp":"2026-07-17T00:32:06.601367+00:00","event":"stage_running","stage":"rewrite_qwen","details":{"attempt":2,"return_code":null,"error":null}}
+{"timestamp":"2026-07-17T00:32:06.611802+00:00","event":"stage_process_started","stage":"rewrite_qwen","details":{"pid":82739}}
+{"timestamp":"2026-07-17T00:45:56.327111+00:00","event":"stage_failed","stage":"rewrite_qwen","details":{"attempt":2,"return_code":1,"error":"command exited with status 1"}}
+{"timestamp":"2026-07-17T00:45:56.336533+00:00","event":"stage_blocked","stage":"encode_bge","details":{"attempt":0,"return_code":null,"error":"a dependency failed"}}
+{"timestamp":"2026-07-17T00:45:56.345743+00:00","event":"stage_blocked","stage":"retrieve_bge","details":{"attempt":0,"return_code":null,"error":"a dependency failed"}}
+{"timestamp":"2026-07-17T00:45:56.354846+00:00","event":"stage_blocked","stage":"fuse_bge","details":{"attempt":0,"return_code":null,"error":"a dependency failed"}}
+{"timestamp":"2026-07-17T00:45:56.363863+00:00","event":"stage_blocked","stage":"evaluate_bge_base","details":{"attempt":0,"return_code":null,"error":"a dependency failed"}}
+{"timestamp":"2026-07-17T00:45:56.373228+00:00","event":"stage_blocked","stage":"rerank_bge","details":{"attempt":0,"return_code":null,"error":"a dependency failed"}}
+{"timestamp":"2026-07-17T00:45:56.382593+00:00","event":"stage_blocked","stage":"evaluate_bge_rerank","details":{"attempt":0,"return_code":null,"error":"a dependency failed"}}
+{"timestamp":"2026-07-17T00:45:56.391795+00:00","event":"stage_blocked","stage":"decide_reranker","details":{"attempt":0,"return_code":null,"error":"a dependency failed"}}
+{"timestamp":"2026-07-17T00:45:56.401918+00:00","event":"stage_blocked","stage":"select_bge","details":{"attempt":0,"return_code":null,"error":"a dependency failed"}}
+{"timestamp":"2026-07-17T00:45:56.410646+00:00","event":"stage_blocked","stage":"generate_task_b","details":{"attempt":0,"return_code":null,"error":"a dependency failed"}}
+{"timestamp":"2026-07-17T00:45:56.419375+00:00","event":"stage_blocked","stage":"generate_task_c_bge","details":{"attempt":0,"return_code":null,"error":"a dependency failed"}}
+{"timestamp":"2026-07-17T00:45:56.428130+00:00","event":"stage_blocked","stage":"evaluate_generation_bge","details":{"attempt":0,"return_code":null,"error":"a dependency failed"}}
+{"timestamp":"2026-07-17T00:45:56.433012+00:00","event":"scheduler_stopped","details":{"complete":false,"stop_requested":false}}
+{"timestamp":"2026-07-17T00:58:49.382256+00:00","event":"run_resumed","details":{"reset_stages":["rewrite_qwen","encode_bge","retrieve_bge","fuse_bge","evaluate_bge_base","rerank_bge","evaluate_bge_rerank","decide_reranker","select_bge","generate_task_b","generate_task_c_bge","evaluate_generation_bge"]}}
+{"timestamp":"2026-07-17T00:58:49.387198+00:00","event":"scheduler_started"}
+{"timestamp":"2026-07-17T00:58:49.421281+00:00","event":"stage_running","stage":"rewrite_qwen","details":{"attempt":3,"return_code":null,"error":null}}
+{"timestamp":"2026-07-17T00:58:49.431524+00:00","event":"stage_process_started","stage":"rewrite_qwen","details":{"pid":107510}}
+{"timestamp":"2026-07-17T01:02:56.632659+00:00","event":"stage_succeeded","stage":"rewrite_qwen","details":{"attempt":3,"return_code":0,"error":null}}
+{"timestamp":"2026-07-17T01:02:56.700499+00:00","event":"stage_running","stage":"encode_bge","details":{"attempt":1,"return_code":null,"error":null}}
+{"timestamp":"2026-07-17T01:02:56.709989+00:00","event":"stage_process_started","stage":"encode_bge","details":{"pid":112703}}
+{"timestamp":"2026-07-17T01:03:23.981799+00:00","event":"shutdown_requested"}
+{"timestamp":"2026-07-17T01:03:25.145058+00:00","event":"stage_interrupted","stage":"encode_bge","details":{"attempt":1,"return_code":-2,"error":"scheduler shutdown interrupted the stage"}}
+{"timestamp":"2026-07-17T01:03:25.150440+00:00","event":"scheduler_stopped","details":{"complete":false,"stop_requested":true}}
+{"timestamp":"2026-07-17T01:06:22.868875+00:00","event":"run_resumed","details":{"reset_stages":["encode_bge"]}}
+{"timestamp":"2026-07-17T01:06:22.873379+00:00","event":"scheduler_started"}
+{"timestamp":"2026-07-17T01:06:22.900736+00:00","event":"stage_running","stage":"encode_bge","details":{"attempt":2,"return_code":null,"error":null}}
+{"timestamp":"2026-07-17T01:06:22.910402+00:00","event":"stage_process_started","stage":"encode_bge","details":{"pid":116121}}
+{"timestamp":"2026-07-17T01:07:09.828333+00:00","event":"stage_succeeded","stage":"encode_bge","details":{"attempt":2,"return_code":0,"error":null}}
+{"timestamp":"2026-07-17T01:07:09.840126+00:00","event":"stage_running","stage":"retrieve_bge","details":{"attempt":1,"return_code":null,"error":null}}
+{"timestamp":"2026-07-17T01:07:09.849494+00:00","event":"stage_process_started","stage":"retrieve_bge","details":{"pid":116857}}
+{"timestamp":"2026-07-17T01:07:23.603076+00:00","event":"stage_succeeded","stage":"retrieve_bge","details":{"attempt":1,"return_code":0,"error":null}}
+{"timestamp":"2026-07-17T01:07:23.615537+00:00","event":"stage_running","stage":"fuse_bge","details":{"attempt":1,"return_code":null,"error":null}}
+{"timestamp":"2026-07-17T01:07:23.625678+00:00","event":"stage_process_started","stage":"fuse_bge","details":{"pid":117109}}
+{"timestamp":"2026-07-17T01:07:24.747076+00:00","event":"stage_succeeded","stage":"fuse_bge","details":{"attempt":1,"return_code":0,"error":null}}
+{"timestamp":"2026-07-17T01:07:24.766868+00:00","event":"stage_running","stage":"evaluate_bge_base","details":{"attempt":1,"return_code":null,"error":null}}
+{"timestamp":"2026-07-17T01:07:24.777243+00:00","event":"stage_process_started","stage":"evaluate_bge_base","details":{"pid":117135}}
+{"timestamp":"2026-07-17T01:07:24.787589+00:00","event":"stage_running","stage":"rerank_bge","details":{"attempt":1,"return_code":null,"error":null}}
+{"timestamp":"2026-07-17T01:07:24.796862+00:00","event":"stage_process_started","stage":"rerank_bge","details":{"pid":117137}}
+{"timestamp":"2026-07-17T01:07:26.396863+00:00","event":"stage_succeeded","stage":"evaluate_bge_base","details":{"attempt":1,"return_code":0,"error":null}}
+{"timestamp":"2026-07-17T01:14:36.110995+00:00","event":"stage_failed","stage":"rerank_bge","details":{"attempt":1,"return_code":1,"error":"command exited with status 1"}}
+{"timestamp":"2026-07-17T01:14:36.120257+00:00","event":"stage_blocked","stage":"evaluate_bge_rerank","details":{"attempt":0,"return_code":null,"error":"a dependency failed"}}
+{"timestamp":"2026-07-17T01:14:36.129373+00:00","event":"stage_blocked","stage":"decide_reranker","details":{"attempt":0,"return_code":null,"error":"a dependency failed"}}
+{"timestamp":"2026-07-17T01:14:36.138282+00:00","event":"stage_blocked","stage":"select_bge","details":{"attempt":0,"return_code":null,"error":"a dependency failed"}}
+{"timestamp":"2026-07-17T01:14:36.147079+00:00","event":"stage_blocked","stage":"generate_task_b","details":{"attempt":0,"return_code":null,"error":"a dependency failed"}}
+{"timestamp":"2026-07-17T01:14:36.155926+00:00","event":"stage_blocked","stage":"generate_task_c_bge","details":{"attempt":0,"return_code":null,"error":"a dependency failed"}}
+{"timestamp":"2026-07-17T01:14:36.165284+00:00","event":"stage_blocked","stage":"evaluate_generation_bge","details":{"attempt":0,"return_code":null,"error":"a dependency failed"}}
+{"timestamp":"2026-07-17T01:14:36.169893+00:00","event":"scheduler_stopped","details":{"complete":false,"stop_requested":false}}
+{"timestamp":"2026-07-17T01:19:23.314695+00:00","event":"run_resumed","details":{"reset_stages":["rerank_bge","evaluate_bge_rerank","decide_reranker","select_bge","generate_task_b","generate_task_c_bge","evaluate_generation_bge"]}}
+{"timestamp":"2026-07-17T01:19:23.319258+00:00","event":"scheduler_started"}
+{"timestamp":"2026-07-17T01:19:23.347907+00:00","event":"stage_running","stage":"rerank_bge","details":{"attempt":2,"return_code":null,"error":null}}
+{"timestamp":"2026-07-17T01:19:23.356955+00:00","event":"stage_process_started","stage":"rerank_bge","details":{"pid":128394}}
+{"timestamp":"2026-07-17T01:23:28.637573+00:00","event":"stage_succeeded","stage":"rerank_bge","details":{"attempt":2,"return_code":0,"error":null}}
+{"timestamp":"2026-07-17T01:23:28.647840+00:00","event":"stage_running","stage":"evaluate_bge_rerank","details":{"attempt":1,"return_code":null,"error":null}}
+{"timestamp":"2026-07-17T01:23:28.657126+00:00","event":"stage_process_started","stage":"evaluate_bge_rerank","details":{"pid":131986}}
+{"timestamp":"2026-07-17T01:23:28.969771+00:00","event":"stage_succeeded","stage":"evaluate_bge_rerank","details":{"attempt":1,"return_code":0,"error":null}}
+{"timestamp":"2026-07-17T01:23:28.984392+00:00","event":"stage_running","stage":"decide_reranker","details":{"attempt":1,"return_code":null,"error":null}}
+{"timestamp":"2026-07-17T01:23:28.993767+00:00","event":"stage_process_started","stage":"decide_reranker","details":{"pid":131988}}
+{"timestamp":"2026-07-17T01:23:30.205553+00:00","event":"stage_succeeded","stage":"decide_reranker","details":{"attempt":1,"return_code":0,"error":null}}
+{"timestamp":"2026-07-17T01:23:30.215977+00:00","event":"stage_running","stage":"select_bge","details":{"attempt":1,"return_code":null,"error":null}}
+{"timestamp":"2026-07-17T01:23:30.224868+00:00","event":"stage_process_started","stage":"select_bge","details":{"pid":132018}}
+{"timestamp":"2026-07-17T01:23:30.233056+00:00","event":"stage_running","stage":"generate_task_b","details":{"attempt":1,"return_code":null,"error":null}}
+{"timestamp":"2026-07-17T01:23:30.242033+00:00","event":"stage_process_started","stage":"generate_task_b","details":{"pid":132020}}
+{"timestamp":"2026-07-17T01:23:31.137420+00:00","event":"stage_succeeded","stage":"select_bge","details":{"attempt":1,"return_code":0,"error":null}}
+{"timestamp":"2026-07-17T02:56:56.217329+00:00","event":"stage_succeeded","stage":"generate_task_b","details":{"attempt":1,"return_code":0,"error":null}}
+{"timestamp":"2026-07-17T02:56:56.284819+00:00","event":"stage_running","stage":"generate_task_c_bge","details":{"attempt":1,"return_code":null,"error":null}}
+{"timestamp":"2026-07-17T02:56:56.304107+00:00","event":"stage_process_started","stage":"generate_task_c_bge","details":{"pid":214655}}
+{"timestamp":"2026-07-17T04:58:45.491020+00:00","event":"stage_succeeded","stage":"generate_task_c_bge","details":{"attempt":1,"return_code":0,"error":null}}
+{"timestamp":"2026-07-17T04:58:45.542399+00:00","event":"stage_running","stage":"evaluate_generation_bge","details":{"attempt":1,"return_code":null,"error":null}}
+{"timestamp":"2026-07-17T04:58:45.558062+00:00","event":"stage_process_started","stage":"evaluate_generation_bge","details":{"pid":325236}}
+{"timestamp":"2026-07-17T07:07:52.700239+00:00","event":"shutdown_requested"}
+{"timestamp":"2026-07-17T07:07:53.565504+00:00","event":"stage_interrupted","stage":"evaluate_generation_bge","details":{"attempt":1,"return_code":-2,"error":"scheduler shutdown interrupted the stage"}}
+{"timestamp":"2026-07-17T07:07:53.573925+00:00","event":"scheduler_stopped","details":{"complete":false,"stop_requested":true}}
+{"timestamp":"2026-07-17T07:28:09.503197+00:00","event":"run_resumed","details":{"reset_stages":["evaluate_generation_bge"]}}
+{"timestamp":"2026-07-17T07:28:09.507646+00:00","event":"scheduler_started"}
+{"timestamp":"2026-07-17T07:28:09.543699+00:00","event":"stage_running","stage":"evaluate_generation_bge","details":{"attempt":2,"return_code":null,"error":null}}
+{"timestamp":"2026-07-17T07:28:09.552650+00:00","event":"stage_process_started","stage":"evaluate_generation_bge","details":{"pid":457822}}
+{"timestamp":"2026-07-17T07:51:50.474410+00:00","event":"stage_succeeded","stage":"evaluate_generation_bge","details":{"attempt":2,"return_code":0,"error":null}}
+{"timestamp":"2026-07-17T07:51:50.479472+00:00","event":"scheduler_stopped","details":{"complete":true,"stop_requested":false}}

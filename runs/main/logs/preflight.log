@@ -1,0 +1,4 @@
+
+[2026-07-17T00:19:44.887399+00:00] $ /home/victor/dev/GitHub/mt-rag/.venv/bin/python3 /home/victor/dev/GitHub/mt-rag/scripts/run_experiment.py stage preflight --config /home/victor/dev/GitHub/mt-rag/configs/experiment.toml --run-dir /home/victor/dev/GitHub/mt-rag/runs/main
+ready: benchmark, Elasticsearch 9.4.3, qwen3.5:4b-q4_K_M, BGE-M3, reranker, NVIDIA GeForce RTX 3060 Laptop GPU
+warning: ELSER is not ready; run the BGE phase now, then extend the same run with the full phase after `make elser-setup`

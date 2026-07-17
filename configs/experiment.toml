@@ -1,0 +1,73 @@
+[run]
+name = "main"
+output_root = "runs"
+benchmark_root = "../mt-rag-benchmark"
+cpu_slots = 4
+
+[services]
+elasticsearch_url = "http://127.0.0.1:9200"
+elser_inference_id = "mtrag-elser"
+ollama_url = "http://127.0.0.1:11434"
+
+[models]
+bge_path = "~/.cache/mtrag/models/bge-m3"
+bge_revision = "5617a9f61b028005a4858fdac845db406aefb181"
+bge_batch_size = 32
+bge_max_length = 512
+reranker_path = "~/.cache/mtrag/models/bge-reranker-v2-m3"
+reranker_revision = "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e"
+reranker_batch_size = 8
+reranker_max_length = 512
+ollama_model = "qwen3.5:4b-q4_K_M"
+ollama_digest = "2a654d98e6fba55d452b7043684e9b57a947e393bbffa62485a7aac05ee4eefd"
+ollama_num_ctx = 8192
+ollama_keep_alive = "10m"
+ollama_seed = 42
+ollama_timeout = 600
+
+[rewriting]
+max_tokens = 128
+
+[rewriting.variants.qwen_t0]
+temperature = 0.0
+
+[rewriting.variants.qwen_t02]
+temperature = 0.2
+
+[retrieval]
+dense_top_k = 50
+dense_candidate_multiplier = 10
+dense_rescore_oversample = 2.0
+sparse_top_k = 50
+elser_top_k = 20
+rrf_top_k = 20
+rrf_rank_constant = 60
+prediction_top_k = 10
+request_batch_size = 64
+
+[reranking]
+input_top_k = 20
+output_top_k = 10
+task_batch_size = 32
+minimum_ndcg5_gain = 0.01
+minimum_improvement_probability = 0.95
+bootstrap_samples = 5000
+bootstrap_seed = 42
+
+[generation]
+context_top_k = 5
+max_tokens = 512
+temperature = 0.1
+run_algorithmic_metrics = true
+bertscore_model = "microsoft/deberta-xlarge-mnli"
+bertscore_batch_size = 1
+
+[thermal]
+gpu_pause = 86.0
+gpu_resume = 72.0
+gpu_abort = 86.0
+cpu_pause = 90.0
+cpu_resume = 80.0
+cpu_abort = 97.0
+poll_interval = 5.0
+resume_hold = 30.0

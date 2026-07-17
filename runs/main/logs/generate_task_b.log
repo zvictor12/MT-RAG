@@ -1,0 +1,182 @@
+
+[2026-07-17T01:23:30.228855+00:00] $ /home/victor/dev/GitHub/mt-rag/.venv/bin/python3 /home/victor/dev/GitHub/mt-rag/scripts/run_experiment.py stage generate_task_b --config /home/victor/dev/GitHub/mt-rag/configs/experiment.toml --run-dir /home/victor/dev/GitHub/mt-rag/runs/main
+thermal pause: GPU 67.0°C, CPU 93.0°C
+task b: 10/842
+thermal pause: GPU 68.0°C, CPU 95.0°C
+task b: 20/842
+thermal pause: GPU 67.0°C, CPU 94.0°C
+task b: 30/842
+task b: 40/842
+task b: 50/842
+thermal pause: GPU 74.0°C, CPU 95.0°C
+thermal pause: GPU 69.0°C, CPU 97.0°C
+thermal pause: GPU 66.0°C, CPU 90.0°C
+task b: 60/842
+thermal pause: GPU 68.0°C, CPU 95.0°C
+task b: 70/842
+thermal pause: GPU 71.0°C, CPU 91.0°C
+thermal pause: GPU 67.0°C, CPU 90.0°C
+thermal pause: GPU 68.0°C, CPU 93.0°C
+task b: 80/842
+thermal pause: GPU 69.0°C, CPU 93.0°C
+task b: 90/842
+thermal pause: GPU 71.0°C, CPU 90.0°C
+task b: 100/842
+task b: 110/842
+task b: 120/842
+thermal pause: GPU 75.0°C, CPU 90.0°C
+task b: 130/842
+thermal pause: GPU 74.0°C, CPU 91.0°C
+thermal pause: GPU 70.0°C, CPU 94.0°C
+task b: 140/842
+thermal pause: GPU 74.0°C, CPU 95.0°C
+task b: 150/842
+thermal pause: GPU 74.0°C, CPU 90.0°C
+thermal pause: GPU 69.0°C, CPU 90.0°C
+task b: 160/842
+thermal pause: GPU 71.0°C, CPU 91.0°C
+thermal pause: GPU 69.0°C, CPU 97.0°C
+task b: 170/842
+task b: 180/842
+thermal pause: GPU 73.0°C, CPU 90.0°C
+thermal pause: GPU 72.0°C, CPU 94.0°C
+task b: 190/842
+task b: 200/842
+thermal pause: GPU 73.0°C, CPU 95.0°C
+thermal pause: GPU 72.0°C, CPU 90.0°C
+thermal pause: GPU 69.0°C, CPU 94.0°C
+task b: 210/842
+thermal pause: GPU 70.0°C, CPU 91.0°C
+task b: 220/842
+thermal pause: GPU 70.0°C, CPU 93.0°C
+task b: 230/842
+thermal pause: GPU 69.0°C, CPU 95.0°C
+task b: 240/842
+task b: 250/842
+thermal pause: GPU 74.0°C, CPU 95.0°C
+thermal pause: GPU 69.0°C, CPU 94.0°C
+task b: 260/842
+thermal pause: GPU 70.0°C, CPU 95.0°C
+task b: 270/842
+task b: 280/842
+thermal pause: GPU 72.0°C, CPU 95.0°C
+thermal pause: GPU 69.0°C, CPU 95.0°C
+task b: 290/842
+task b: 300/842
+thermal pause: GPU 73.0°C, CPU 95.0°C
+task b: 310/842
+thermal pause: GPU 72.0°C, CPU 97.0°C
+thermal pause: GPU 71.0°C, CPU 95.0°C
+task b: 320/842
+thermal pause: GPU 68.0°C, CPU 94.0°C
+thermal pause: GPU 68.0°C, CPU 95.0°C
+thermal pause: GPU 67.0°C, CPU 94.0°C
+task b: 330/842
+thermal pause: GPU 66.0°C, CPU 90.0°C
+task b: 340/842
+thermal pause: GPU 70.0°C, CPU 95.0°C
+task b: 350/842
+thermal pause: GPU 69.0°C, CPU 95.0°C
+task b: 360/842
+task b: 370/842
+task b: 380/842
+thermal pause: GPU 74.0°C, CPU 95.0°C
+task b: 390/842
+thermal pause: GPU 71.0°C, CPU 91.0°C
+task b: 400/842
+thermal pause: GPU 72.0°C, CPU 95.0°C
+task b: 410/842
+thermal pause: GPU 70.0°C, CPU 95.0°C
+task b: 420/842
+thermal pause: GPU 71.0°C, CPU 93.0°C
+thermal pause: GPU 69.0°C, CPU 94.0°C
+task b: 430/842
+thermal pause: GPU 67.0°C, CPU 94.0°C
+task b: 440/842
+thermal pause: GPU 66.0°C, CPU 94.0°C
+task b: 450/842
+thermal pause: GPU 68.0°C, CPU 95.0°C
+thermal pause: GPU 66.0°C, CPU 93.0°C
+task b: 460/842
+thermal pause: GPU 69.0°C, CPU 95.0°C
+task b: 470/842
+thermal pause: GPU 67.0°C, CPU 93.0°C
+thermal pause: GPU 67.0°C, CPU 93.0°C
+thermal pause: GPU 67.0°C, CPU 94.0°C
+task b: 480/842
+thermal pause: GPU 69.0°C, CPU 91.0°C
+task b: 490/842
+task b: 500/842
+thermal pause: GPU 70.0°C, CPU 91.0°C
+thermal pause: GPU 69.0°C, CPU 95.0°C
+task b: 510/842
+task b: 520/842
+thermal pause: GPU 72.0°C, CPU 94.0°C
+thermal pause: GPU 66.0°C, CPU 93.0°C
+task b: 530/842
+thermal pause: GPU 70.0°C, CPU 90.0°C
+task b: 540/842
+thermal pause: GPU 67.0°C, CPU 93.0°C
+task b: 550/842
+thermal pause: GPU 70.0°C, CPU 94.0°C
+task b: 560/842
+task b: 570/842
+task b: 580/842
+thermal pause: GPU 73.0°C, CPU 92.0°C
+task b: 590/842
+thermal pause: GPU 70.0°C, CPU 91.0°C
+task b: 600/842
+thermal pause: GPU 71.0°C, CPU 90.0°C
+task b: 610/842
+task b: 620/842
+thermal pause: GPU 73.0°C, CPU 94.0°C
+thermal pause: GPU 68.0°C, CPU 95.0°C
+task b: 630/842
+thermal pause: GPU 68.0°C, CPU 94.0°C
+thermal pause: GPU 64.0°C, CPU 91.0°C
+task b: 640/842
+thermal pause: GPU 68.0°C, CPU 94.0°C
+task b: 650/842
+thermal pause: GPU 68.0°C, CPU 95.0°C
+thermal pause: GPU 66.0°C, CPU 91.0°C
+thermal pause: GPU 66.0°C, CPU 90.0°C
+task b: 660/842
+thermal pause: GPU 70.0°C, CPU 95.0°C
+task b: 670/842
+thermal pause: GPU 65.0°C, CPU 94.0°C
+thermal pause: GPU 68.0°C, CPU 97.0°C
+thermal pause: GPU 65.0°C, CPU 93.0°C
+task b: 680/842
+thermal pause: GPU 66.0°C, CPU 94.0°C
+task b: 690/842
+thermal pause: GPU 72.0°C, CPU 94.0°C
+task b: 700/842
+thermal pause: GPU 69.0°C, CPU 95.0°C
+task b: 710/842
+thermal pause: GPU 70.0°C, CPU 91.0°C
+task b: 720/842
+thermal pause: GPU 71.0°C, CPU 91.0°C
+thermal pause: GPU 69.0°C, CPU 93.0°C
+task b: 730/842
+task b: 740/842
+thermal pause: GPU 72.0°C, CPU 95.0°C
+task b: 750/842
+thermal pause: GPU 70.0°C, CPU 95.0°C
+thermal pause: GPU 69.0°C, CPU 95.0°C
+task b: 760/842
+task b: 770/842
+thermal pause: GPU 71.0°C, CPU 91.0°C
+thermal pause: GPU 67.0°C, CPU 94.0°C
+task b: 780/842
+thermal pause: GPU 67.0°C, CPU 94.0°C
+task b: 790/842
+task b: 800/842
+thermal pause: GPU 74.0°C, CPU 93.0°C
+thermal pause: GPU 70.0°C, CPU 92.0°C
+task b: 810/842
+task b: 820/842
+task b: 830/842
+thermal pause: GPU 76.0°C, CPU 90.0°C
+thermal pause: GPU 70.0°C, CPU 91.0°C
+task b: 840/842
+task b: 842/842

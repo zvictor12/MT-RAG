@@ -1,0 +1,13 @@
+{
+  "winner": "bge_rrf_qwen_reranked",
+  "metric": "ndcg@5",
+  "score": 0.37729571253509747,
+  "scores": {
+    "bge_dense_qwen": 0.34623904453900817,
+    "bge_sparse_qwen": 0.2550502039759872,
+    "bge_rrf_qwen_reranked": 0.37729571253509747
+  },
+  "reranker_enabled": true,
+  "candidate_artifact": "/home/victor/dev/GitHub/mt-rag/runs/main/candidates/bge_selected.jsonl",
+  "task_a_prediction": "/home/victor/dev/GitHub/mt-rag/runs/main/predictions/task_a/bge_selected.jsonl"
+}

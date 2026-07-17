@@ -1,0 +1,61 @@
+
+[2026-07-17T01:07:24.782765+00:00] $ /home/victor/dev/GitHub/mt-rag/.venv/bin/python3 /home/victor/dev/GitHub/mt-rag/scripts/run_experiment.py stage rerank_bge --config /home/victor/dev/GitHub/mt-rag/configs/experiment.toml --run-dir /home/victor/dev/GitHub/mt-rag/runs/main
+You're using a XLMRobertaTokenizerFast tokenizer. Please note that with a fast tokenizer, using the `__call__` method is faster than using a method to encode the text followed by a call to the `pad` method to get a padded encoding.
+bge_rrf_qwen_reranked: 32/842
+bge_rrf_qwen_reranked: 64/842
+bge_rrf_qwen_reranked: 96/842
+bge_rrf_qwen_reranked: 128/842
+thermal pause: GPU 69.0°C, CPU 94.0°C
+bge_rrf_qwen_reranked: 160/842
+bge_rrf_qwen_reranked: 192/842
+bge_rrf_qwen_reranked: 224/842
+thermal pause: GPU 70.0°C, CPU 94.0°C
+bge_rrf_qwen_reranked: 256/842
+bge_rrf_qwen_reranked: 288/842
+bge_rrf_qwen_reranked: 320/842
+thermal pause: GPU 70.0°C, CPU 94.0°C
+thermal pause: GPU 66.0°C, CPU 95.0°C
+bge_rrf_qwen_reranked: 352/842
+thermal pause: GPU 65.0°C, CPU 94.0°C
+bge_rrf_qwen_reranked: 384/842
+bge_rrf_qwen_reranked: 416/842
+thermal pause: GPU 68.0°C, CPU 93.0°C
+bge_rrf_qwen_reranked: 448/842
+bge_rrf_qwen_reranked: 480/842
+bge_rrf_qwen_reranked: 512/842
+bge_rrf_qwen_reranked: 544/842
+thermal pause: GPU 72.0°C, CPU 97.0°C
+bge_rrf_qwen_reranked: 576/842
+bge_rrf_qwen_reranked: 608/842
+Traceback (most recent call last):
+  File "/home/victor/dev/GitHub/mt-rag/scripts/run_experiment.py", line 171, in <module>
+    main()
+  File "/home/victor/dev/GitHub/mt-rag/scripts/run_experiment.py", line 151, in main
+    run_stage(args.name, config, RunArtifacts(run_dir))
+  File "/home/victor/dev/GitHub/mt-rag/src/mtrag/experiments/stages.py", line 63, in run_stage
+    stage(config, artifacts)
+  File "/home/victor/dev/GitHub/mt-rag/src/mtrag/experiments/retrieval_stages.py", line 316, in rerank_bge
+    _rerank(
+  File "/home/victor/dev/GitHub/mt-rag/src/mtrag/experiments/retrieval_stages.py", line 293, in _rerank
+    reranked = service.rerank_many(
+               ^^^^^^^^^^^^^^^^^^^^
+  File "/home/victor/dev/GitHub/mt-rag/src/mtrag/reranking/service.py", line 58, in rerank_many
+    passage = passage_text(hit)
+              ^^^^^^^^^^^^^^^^^
+  File "/home/victor/dev/GitHub/mt-rag/src/mtrag/reranking/service.py", line 12, in passage_text
+    raise ValueError(f"Candidate {hit.document_id} has no text")
+ValueError: Candidate ibmcld_00004-0-0 has no text
+
+[2026-07-17T01:19:23.343293+00:00] $ /home/victor/dev/GitHub/mt-rag/.venv/bin/python3 /home/victor/dev/GitHub/mt-rag/scripts/run_experiment.py stage rerank_bge --config /home/victor/dev/GitHub/mt-rag/configs/experiment.toml --run-dir /home/victor/dev/GitHub/mt-rag/runs/main
+thermal pause: GPU 54.0°C, CPU 94.0°C
+You're using a XLMRobertaTokenizerFast tokenizer. Please note that with a fast tokenizer, using the `__call__` method is faster than using a method to encode the text followed by a call to the `pad` method to get a padded encoding.
+bge_rrf_qwen_reranked: 640/842
+bge_rrf_qwen_reranked: 672/842
+bge_rrf_qwen_reranked: 704/842
+bge_rrf_qwen_reranked: 736/842
+thermal pause: GPU 68.0°C, CPU 94.0°C
+bge_rrf_qwen_reranked: 768/842
+bge_rrf_qwen_reranked: 800/842
+thermal pause: GPU 68.0°C, CPU 94.0°C
+bge_rrf_qwen_reranked: 832/842
+bge_rrf_qwen_reranked: 842/842

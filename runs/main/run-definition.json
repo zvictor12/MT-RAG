@@ -1,0 +1,6 @@
+{
+  "config_sha256": "ceaa9b8887fe437f2e7db52d346f700ac15150cbab5f7b4c92339d75c468646c",
+  "config_digest_scope": "excluding-thermal-v1",
+  "rewrite_prompt_version": "qwen-rewrite-v2",
+  "generator_prompt_version": "qwen-grounded-generation-v1"
+}

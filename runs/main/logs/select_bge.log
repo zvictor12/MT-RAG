@@ -1,0 +1,3 @@
+
+[2026-07-17T01:23:30.211721+00:00] $ /home/victor/dev/GitHub/mt-rag/.venv/bin/python3 /home/victor/dev/GitHub/mt-rag/scripts/run_experiment.py stage select_bge --config /home/victor/dev/GitHub/mt-rag/configs/experiment.toml --run-dir /home/victor/dev/GitHub/mt-rag/runs/main
+BGE winner: bge_rrf_qwen_reranked (0.3773)

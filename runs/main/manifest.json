@@ -1,0 +1,124 @@
+{
+  "version": 1,
+  "created_at": "2026-07-17T00:19:44.870127+00:00",
+  "updated_at": "2026-07-17T07:51:50.466181+00:00",
+  "stages": {
+    "decide_reranker": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-17T01:23:28.979866+00:00",
+      "finished_at": "2026-07-17T01:23:30.200880+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "encode_bge": {
+      "status": "succeeded",
+      "attempts": 2,
+      "started_at": "2026-07-17T01:06:22.896214+00:00",
+      "finished_at": "2026-07-17T01:07:09.820051+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "evaluate_bge_base": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-17T01:07:24.760768+00:00",
+      "finished_at": "2026-07-17T01:07:26.389105+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "evaluate_bge_rerank": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-17T01:23:28.643495+00:00",
+      "finished_at": "2026-07-17T01:23:28.962668+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "evaluate_generation_bge": {
+      "status": "succeeded",
+      "attempts": 2,
+      "started_at": "2026-07-17T07:28:09.539514+00:00",
+      "finished_at": "2026-07-17T07:51:50.466160+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "fuse_bge": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-17T01:07:23.610393+00:00",
+      "finished_at": "2026-07-17T01:07:24.733661+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "generate_task_b": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-17T01:23:30.228883+00:00",
+      "finished_at": "2026-07-17T02:56:56.182528+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "generate_task_c_bge": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-17T02:56:56.279095+00:00",
+      "finished_at": "2026-07-17T04:58:45.473702+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "preflight": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-17T00:19:44.887419+00:00",
+      "finished_at": "2026-07-17T00:19:46.209777+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "rerank_bge": {
+      "status": "succeeded",
+      "attempts": 2,
+      "started_at": "2026-07-17T01:19:23.343341+00:00",
+      "finished_at": "2026-07-17T01:23:28.629763+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "retrieve_bge": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-17T01:07:09.835334+00:00",
+      "finished_at": "2026-07-17T01:07:23.594883+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "rewrite_qwen": {
+      "status": "succeeded",
+      "attempts": 3,
+      "started_at": "2026-07-17T00:58:49.416330+00:00",
+      "finished_at": "2026-07-17T01:02:56.625003+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "select_bge": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-17T01:23:30.211743+00:00",
+      "finished_at": "2026-07-17T01:23:31.132563+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    }
+  }
+}
