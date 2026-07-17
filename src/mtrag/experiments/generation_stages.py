@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from mtrag.data import BenchmarkRepository
+from mtrag.data.jsonl import read_jsonl
 from mtrag.evaluation import (
     AlgorithmicGenerationEvaluator,
     BertScoreBatcher,
@@ -15,13 +17,12 @@ from mtrag.experiments.artifacts import (
     RunArtifacts,
     context_from_hit,
     context_record,
-    read_jsonl,
     record_hits,
     task_record,
 )
 from mtrag.experiments.common import (
     ollama_client,
-    ollama_identity,
+    ollama_model_info,
     progress,
     thermal_guard,
 )
@@ -39,17 +40,21 @@ def generate_job(
     *,
     job_name: str,
     revision: str,
-    context_reference: str | None = None,
-    context_revision: str | None = None,
+    context_reference: str = "",
+    context_revision: str = "",
 ) -> None:
     job = config.generation_job(job_name)
     generator_config = config.generator(job.generator)
     tasks = BenchmarkRepository(config.run.benchmark_root).load_tasks()
+    output = artifacts.generation(job_name, revision)
+    checkpoint = JsonlCheckpoint(output)
+    pending = [task for task in tasks if task.task_id not in checkpoint.completed]
+    if not pending:
+        return
+
     if job.task == "b":
         contexts = {task.task_id: list(task.contexts) for task in tasks}
     else:
-        if context_reference is None or context_revision is None:
-            raise ValueError(f"Task C job {job_name!r} requires retrieval contexts")
         contexts = _retrieved_contexts(
             artifacts,
             context_reference,
@@ -57,15 +62,20 @@ def generate_job(
             generator_config.context_top_k,
         )
 
-    output = artifacts.generation(job_name, revision)
-    checkpoint = JsonlCheckpoint(output)
-    pending = [task for task in tasks if task.task_id not in checkpoint.completed]
     client = ollama_client(config)
     prompt = PromptTemplate.from_file(generator_config.prompt)
+    model_identity, model_provenance = ollama_model_info(config)
+    pipeline = {
+        "job": job_name,
+        "generator": job.generator,
+        "prompt_sha256": prompt.sha256,
+        "temperature": generator_config.temperature,
+        **model_provenance,
+    }
     with SqliteCache(artifacts.cache) as cache:
         generator = AnswerGenerator(
             client,
-            model_name=ollama_identity(config),
+            model_name=model_identity,
             cache=cache,
             guard=thermal_guard(config),
             max_tokens=generator_config.max_tokens,
@@ -80,14 +90,7 @@ def generate_job(
                         task,
                         task_contexts,
                         generator.generate(task, task_contexts),
-                        job_name=job_name,
-                        generator_name=job.generator,
-                        prompt=prompt,
-                        temperature=generator_config.temperature,
-                        model=config.models.ollama_model,
-                        model_digest=config.models.ollama_digest,
-                        num_ctx=config.models.ollama_num_ctx,
-                        seed=config.models.ollama_seed,
+                        pipeline,
                     )
                 )
                 if index % 10 == 0 or index == len(pending):
@@ -136,21 +139,21 @@ def evaluate_generation_jobs(
             )
 
     for evaluation in evaluations:
-        _write_evaluation_summary(artifacts, evaluation)
+        _write_evaluation_summary(evaluation)
 
 
 @dataclass(slots=True)
 class _GenerationEvaluation:
     job_name: str
-    generation_revision: str
-    evaluation_revision: str
     records: list[dict[str, Any]]
     checkpoint: JsonlCheckpoint
+    summary_path: Path
 
     @property
     def pending(self) -> bool:
+        completed = self.checkpoint.completed
         return any(
-            record["task_id"] not in self.checkpoint.completed
+            record["task_id"] not in completed
             for record in self.records
         )
 
@@ -164,8 +167,6 @@ def _load_evaluation(
     evaluation_revision = job["evaluation_revision"]
     return _GenerationEvaluation(
         job_name=job_name,
-        generation_revision=generation_revision,
-        evaluation_revision=evaluation_revision,
         records=read_jsonl(artifacts.generation(job_name, generation_revision)),
         checkpoint=JsonlCheckpoint(
             artifacts.generation_metrics(
@@ -174,23 +175,20 @@ def _load_evaluation(
                 evaluation_revision,
             )
         ),
+        summary_path=artifacts.generation_summary(
+            job_name,
+            generation_revision,
+            evaluation_revision,
+        ),
     )
 
 
 def _write_evaluation_summary(
-    artifacts: RunArtifacts,
     evaluation: _GenerationEvaluation,
 ) -> None:
     evaluated = list(evaluation.checkpoint.records.values())
     summary = summarize_generation_metrics(evaluated)
-    write_json_atomic(
-        artifacts.generation_summary(
-            evaluation.job_name,
-            evaluation.generation_revision,
-            evaluation.evaluation_revision,
-        ),
-        summary,
-    )
+    write_json_atomic(evaluation.summary_path, summary)
     rb_agg = summary["metrics"].get("RB_agg", {}).get("mean")
     suffix = f", RB_agg={rb_agg:.4f}" if rb_agg is not None else ""
     print(
@@ -219,15 +217,7 @@ def _generation_record(
     task: BenchmarkTask,
     contexts: list[Context],
     answer: str,
-    *,
-    job_name: str,
-    generator_name: str,
-    prompt: PromptTemplate,
-    temperature: float,
-    model: str,
-    model_digest: str,
-    num_ctx: int,
-    seed: int,
+    pipeline: Mapping[str, Any],
 ) -> dict:
     record = task_record(task, include_targets=True)
     record["contexts"] = [
@@ -235,14 +225,5 @@ def _generation_record(
         for rank, context in enumerate(contexts[:10], start=1)
     ]
     record["predictions"] = [{"text": answer}]
-    record["pipeline"] = {
-        "job": job_name,
-        "generator": generator_name,
-        "prompt_sha256": prompt.sha256,
-        "temperature": temperature,
-        "model": model,
-        "model_digest": model_digest,
-        "num_ctx": num_ctx,
-        "seed": seed,
-    }
+    record["pipeline"] = dict(pipeline)
     return record

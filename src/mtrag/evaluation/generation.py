@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import math
 import tempfile
@@ -12,6 +11,7 @@ from pathlib import Path
 from statistics import fmean
 from typing import Any, Protocol
 
+from mtrag.data.jsonl import read_jsonl, write_jsonl
 from mtrag.interfaces import BatchGuard, NoopGuard
 
 from .ibm import load_ibm_module
@@ -50,12 +50,8 @@ class BertScoreBatcher:
     ) -> None:
         from bert_score import BERTScorer
 
-        if batch_size <= 0:
-            raise ValueError("batch_size must be positive")
         if chunk_size is None:
             chunk_size = batch_size * 8
-        if chunk_size <= 0:
-            raise ValueError("chunk_size must be positive")
         self.model_type = model_type
         self.scorer = BERTScorer(
             model_type=model_type,
@@ -145,8 +141,6 @@ class AlgorithmicGenerationEvaluator:
         record_batch_size: int = 32,
     ) -> int:
         """Evaluate unfinished records and durably append each completed batch."""
-        if record_batch_size <= 0:
-            raise ValueError("record_batch_size must be positive")
         completed = checkpoint.completed
         pending = [
             record
@@ -166,13 +160,16 @@ class AlgorithmicGenerationEvaluator:
             root = Path(directory)
             input_path = root / "input.jsonl"
             output_path = root / "output.jsonl"
-            _write_jsonl(input_path, records)
+            inputs = [dict(record) for record in records]
+            for record in inputs:
+                record.pop("metrics", None)
+            write_jsonl(input_path, inputs)
             self.module.run_algorithmic_judges(
                 str(self.config),
                 str(input_path),
                 str(output_path),
             )
-            evaluated = _read_jsonl(output_path)
+            evaluated = read_jsonl(output_path)
             expected_ids = [_task_id(record) for record in records]
             actual_ids = [_task_id(record) for record in evaluated]
             if actual_ids != expected_ids:
@@ -214,24 +211,15 @@ class _BertScoreLookup:
         rescale_with_baseline: bool | None = None,
         **kwargs: Any,
     ) -> dict[str, list[float]]:
-        if kwargs:
-            raise ValueError(
-                "unsupported BERTScore arguments from the IBM evaluator: "
-                f"{sorted(kwargs)}"
-            )
-        if lang != "en":
-            raise ValueError(
-                f"IBM evaluator requires English BERTScore, got {lang!r}"
-            )
-        if rescale_with_baseline is not True:
-            raise ValueError(
-                "IBM evaluator must request BERTScore baseline rescaling"
-            )
         expected_model = self.model_type or IBM_BERTSCORE_MODEL
-        if model_type != expected_model:
-            raise ValueError(
-                f"official evaluator requires BERTScore model {model_type!r}, "
-                f"but the batch scorer loaded {expected_model!r}"
+        if (
+            model_type != expected_model
+            or lang != "en"
+            or rescale_with_baseline is not True
+            or kwargs
+        ):
+            raise RuntimeError(
+                "IBM changed its BERTScore request; update the batched adapter"
             )
         scores = [
             self.values[(prediction, reference)]
@@ -285,13 +273,8 @@ def _default_benchmark_root() -> Path:
 
 
 def _source_digest(script: Path, config: Path) -> str:
-    if not config.is_file():
-        raise FileNotFoundError(f"IBM evaluator config not found: {config}")
-    digest = hashlib.sha256()
-    for path in (script, config):
-        digest.update(path.read_bytes())
-        digest.update(b"\0")
-    return digest.hexdigest()
+    content = b"\0".join(path.read_bytes() for path in (script, config))
+    return hashlib.sha256(content).hexdigest()
 
 
 def _semantic_pairs(
@@ -306,31 +289,11 @@ def _semantic_pairs(
 
 
 def _prediction(record: Mapping[str, Any]) -> str:
-    predictions = record.get("predictions") or []
-    if not predictions or not isinstance(predictions[0].get("text"), str):
-        raise ValueError(f"Missing prediction for task {record.get('task_id')}")
-    return predictions[0]["text"]
+    return record["predictions"][0]["text"]
 
 
 def _task_id(record: Mapping[str, Any]) -> str:
-    task_id = record.get("task_id")
-    if not isinstance(task_id, str) or not task_id:
-        raise ValueError("generation record requires a non-empty task_id")
-    return task_id
-
-
-def _write_jsonl(path: Path, records: Sequence[Mapping[str, Any]]) -> None:
-    with path.open("w", encoding="utf-8") as stream:
-        for original in records:
-            record = dict(original)
-            record.pop("metrics", None)
-            stream.write(json.dumps(record, ensure_ascii=False))
-            stream.write("\n")
-
-
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    with path.open(encoding="utf-8") as stream:
-        return [json.loads(line) for line in stream if line.strip()]
+    return record["task_id"]
 
 
 def summarize_generation_metrics(

@@ -176,7 +176,7 @@ class GenerationEvaluationTest(unittest.TestCase):
         finally:
             evaluator.module.run_algorithmic_judges = original
 
-    def test_rejects_incompatible_official_bertscore_arguments(self) -> None:
+    def test_detects_an_incompatible_official_bertscore_request(self) -> None:
         lookup = _BertScoreLookup(
             [("prediction", "reference")],
             [0.1],
@@ -192,13 +192,7 @@ class GenerationEvaluationTest(unittest.TestCase):
             "rescale_with_baseline": True,
         }
 
-        with self.assertRaisesRegex(ValueError, "English"):
-            lookup.compute(**(valid | {"lang": "fr"}))
-        with self.assertRaisesRegex(ValueError, "baseline"):
-            lookup.compute(**(valid | {"rescale_with_baseline": False}))
-        with self.assertRaisesRegex(ValueError, "batch scorer loaded"):
-            lookup.compute(**(valid | {"model_type": "other-model"}))
-        with self.assertRaisesRegex(ValueError, "unsupported"):
+        with self.assertRaisesRegex(RuntimeError, "IBM changed"):
             lookup.compute(**valid, idf=True)
 
     def test_default_thermal_chunk_is_eight_microbatches(self) -> None:

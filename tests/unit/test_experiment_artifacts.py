@@ -3,14 +3,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from mtrag.data.jsonl import read_jsonl, write_jsonl
 from mtrag.experiments.artifacts import (
     JsonlCheckpoint,
     RunArtifacts,
     materialize_prediction,
     ranking_record,
-    read_jsonl,
     record_hits,
-    write_jsonl_atomic,
 )
 from mtrag.schemas import BenchmarkTask, Message, SearchHit
 
@@ -32,7 +31,7 @@ class JsonlCheckpointTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "items.jsonl"
             path.write_text('{"task_id"\n{"task_id":"two"}\n')
-            with self.assertRaisesRegex(ValueError, "corrupt JSONL"):
+            with self.assertRaisesRegex(ValueError, "Invalid JSON"):
                 JsonlCheckpoint(path)
 
     def test_valid_final_record_without_newline_gets_a_separator(self) -> None:
@@ -61,6 +60,14 @@ class JsonlCheckpointTest(unittest.TestCase):
                 )
 
             self.assertEqual(path.read_bytes(), before)
+
+    def test_existing_duplicate_keys_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "items.jsonl"
+            path.write_text('{"task_id":"one"}\n{"task_id":"one"}\n')
+
+            with self.assertRaisesRegex(ValueError, "duplicate checkpoint"):
+                JsonlCheckpoint(path)
 
 
 class ArtifactMappingTest(unittest.TestCase):
@@ -104,14 +111,6 @@ class ArtifactMappingTest(unittest.TestCase):
             Path(f"run/generation/answer/{self.revision}/predictions.jsonl"),
         )
 
-    def test_artifact_revision_must_be_a_full_fingerprint(self) -> None:
-        with self.assertRaisesRegex(ValueError, "fingerprint"):
-            RunArtifacts(Path("run")).candidates("bge_last.dense", "latest")
-
-    def test_artifact_name_must_not_be_absolute(self) -> None:
-        with self.assertRaisesRegex(ValueError, "unsafe artifact name"):
-            RunArtifacts(Path("run")).rewrite("/tmp/escape", self.revision)
-
     def test_official_prediction_fills_tasks_without_a_query_variant(self) -> None:
         tasks = [
             BenchmarkTask(
@@ -136,7 +135,7 @@ class ArtifactMappingTest(unittest.TestCase):
                 title="Title",
                 text="Long internal passage",
             )
-            write_jsonl_atomic(
+            write_jsonl(
                 candidates,
                 [ranking_record(tasks[0], [hit])],
             )

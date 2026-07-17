@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from types import ModuleType
 
 from mtrag.data.benchmark import COLLECTION_TO_DOMAIN
 
@@ -59,14 +58,6 @@ def _mean_metrics(
     )
 
 
-def _official_module(benchmark_root: Path) -> ModuleType:
-    module = load_ibm_module(benchmark_root, "run_retrieval_eval.py")
-    for name in ("prepare_results_dict", "load_qrels", "evaluate"):
-        if not callable(getattr(module, name, None)):
-            raise RuntimeError(f"IBM retrieval evaluator has no {name}()")
-    return module
-
-
 def evaluate_retrieval(
     benchmark_root: str | Path,
     prediction_path: str | Path,
@@ -76,7 +67,7 @@ def evaluate_retrieval(
     root = Path(benchmark_root)
     prediction = Path(prediction_path)
     normalized_cutoffs = _normalized_cutoffs(cutoffs)
-    official = _official_module(root)
+    official = load_ibm_module(root, "run_retrieval_eval.py")
     rankings, collections = official.prepare_results_dict(str(prediction))
 
     domains: dict[str, DomainEvaluation] = {}

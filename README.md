@@ -252,7 +252,8 @@ make experiment-import-legacy RUN_DIR=runs/main EXPERIMENT_SCHEDULE=bge
 
 Если старые файлы точно созданы теми же prompt, моделями и параметрами, их можно
 скопировать в текущие content-addressed ревизии явным opt-in. Перед completion
-marker импорт проверяет полный набор `task_id` и контрольные суммы:
+marker импорт один раз проверяет полный набор `task_id` и обязательные поля.
+Существующую ревизию с другим содержимым он не перезаписывает:
 
 ```bash
 make experiment-import-legacy RUN_DIR=runs/main EXPERIMENT_SCHEDULE=bge \

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from pathlib import Path
 
 from mtrag.data import BenchmarkRepository
+from mtrag.data.jsonl import read_jsonl
 from mtrag.encoding import BgeFeatureStore
 from mtrag.evaluation import RetrievalEvaluation, evaluate_retrieval
 from mtrag.experiments.artifacts import (
@@ -12,7 +12,6 @@ from mtrag.experiments.artifacts import (
     RunArtifacts,
     materialize_prediction,
     ranking_record,
-    read_jsonl,
     record_hits,
 )
 from mtrag.experiments.common import chunks, progress, thermal_guard
@@ -23,7 +22,7 @@ from mtrag.retrieval import DenseRetriever, ElserRetriever, SparseRetriever, rrf
 from mtrag.retrieval.elasticsearch import ElasticsearchGateway
 from mtrag.runtime import SqliteCache
 from mtrag.runtime.state import write_json_atomic
-from mtrag.schemas import BgeFeatures, QueryCase, SearchQuery
+from mtrag.schemas import SearchQuery
 
 
 def retrieve(
@@ -47,17 +46,34 @@ def retrieve(
     )
     retriever, top_k = _retriever(config, method)
     tasks = BenchmarkRepository(config.run.benchmark_root).tasks_by_id()
-    _search_checkpoint(
-        label=reference,
-        cases=cases,
-        queries=_queries(cases, features),
-        tasks_by_id=tasks,
-        retriever=retriever,
-        top_k=top_k,
-        request_batch_size=config.retrieval.request_batch_size,
-        path=artifacts.candidates(reference, revision),
-        guard=thermal_guard(config),
-    )
+    checkpoint = JsonlCheckpoint(artifacts.candidates(reference, revision))
+    pending = [case for case in cases if case.task_id not in checkpoint.completed]
+    if not pending:
+        return
+
+    completed = len(cases) - len(pending)
+    guard = thermal_guard(config)
+
+    for batch in chunks(pending, config.retrieval.request_batch_size):
+        guard.wait("cpu")
+        queries = [
+            SearchQuery(
+                task_id=case.task_id,
+                domain=case.domain,
+                text=case.text,
+                bge=features[case.task_id] if features is not None else None,
+            )
+            for case in batch
+        ]
+        results = retriever.search_many(queries, top_k=top_k)
+        checkpoint.append_many(
+            [
+                ranking_record(tasks[case.task_id], results[case.task_id])
+                for case in batch
+            ]
+        )
+        completed += len(batch)
+        progress(reference, completed, len(cases))
 
 
 def fuse(
@@ -112,6 +128,19 @@ def rerank(
     query_revision: str,
 ) -> None:
     cases = query_cases(config, artifacts, query_name, query_revision)
+    queries = {case.task_id: case.text for case in cases}
+    tasks = BenchmarkRepository(config.run.benchmark_root).tasks_by_id()
+    source = _records_by_id(artifacts.candidates(source_reference, source_revision))
+    checkpoint = JsonlCheckpoint(artifacts.candidates(reference, revision))
+    pending = [
+        task_id
+        for task_id in queries
+        if task_id in source and task_id not in checkpoint.completed
+    ]
+    if not pending:
+        return
+
+    completed = len(queries) - len(pending)
     scorer = BgeV2M3Scorer(
         config.models.reranker_path,
         batch_size=config.models.reranker_batch_size,
@@ -126,16 +155,25 @@ def rerank(
                 model_revision=config.models.reranker_revision,
                 max_length=config.models.reranker_max_length,
             )
-            _rerank_with_service(
-                config,
-                artifacts,
-                cases=cases,
-                source_reference=source_reference,
-                source_revision=source_revision,
-                reference=reference,
-                revision=revision,
-                service=service,
-            )
+            for batch in chunks(pending, config.reranking.task_batch_size):
+                reranked = service.rerank_many(
+                    {task_id: queries[task_id] for task_id in batch},
+                    {
+                        task_id: record_hits(source[task_id])[
+                            : config.reranking.input_top_k
+                        ]
+                        for task_id in batch
+                    },
+                    top_k=config.reranking.output_top_k,
+                )
+                checkpoint.append_many(
+                    [
+                        ranking_record(tasks[task_id], reranked[task_id])
+                        for task_id in batch
+                    ]
+                )
+                completed += len(batch)
+                progress(reference, completed, len(queries))
     finally:
         scorer.close()
 
@@ -185,98 +223,7 @@ def _retriever(config: ExperimentConfig, method: str):
         )
     if method == "sparse":
         return SparseRetriever(gateway), config.retrieval.sparse_top_k
-    if method == "elser":
-        return ElserRetriever(gateway), config.retrieval.elser_top_k
-    raise ValueError(f"unknown retrieval method: {method}")
-
-
-def _queries(
-    cases: Sequence[QueryCase],
-    features: Mapping[str, BgeFeatures] | None,
-) -> list[SearchQuery]:
-    return [
-        SearchQuery(
-            task_id=case.task_id,
-            domain=case.domain,
-            text=case.text,
-            bge=features[case.task_id] if features is not None else None,
-        )
-        for case in cases
-    ]
-
-
-def _search_checkpoint(
-    *,
-    label: str,
-    cases: Sequence[QueryCase],
-    queries: Sequence[SearchQuery],
-    tasks_by_id,
-    retriever,
-    top_k: int,
-    request_batch_size: int,
-    path: Path,
-    guard,
-) -> None:
-    checkpoint = JsonlCheckpoint(path)
-    pending = [
-        (case, query)
-        for case, query in zip(cases, queries, strict=True)
-        if case.task_id not in checkpoint.completed
-    ]
-    completed = len(cases) - len(pending)
-    for batch in chunks(pending, request_batch_size):
-        guard.wait("cpu")
-        results = retriever.search_many(
-            [query for _case, query in batch],
-            top_k=top_k,
-        )
-        checkpoint.append_many(
-            [
-                ranking_record(tasks_by_id[case.task_id], results[case.task_id])
-                for case, _query in batch
-            ]
-        )
-        completed += len(batch)
-        progress(label, completed, len(cases))
-
-
-def _rerank_with_service(
-    config: ExperimentConfig,
-    artifacts: RunArtifacts,
-    *,
-    cases: Sequence[QueryCase],
-    source_reference: str,
-    source_revision: str,
-    reference: str,
-    revision: str,
-    service: RerankService,
-) -> None:
-    queries = {case.task_id: case.text for case in cases}
-    tasks = BenchmarkRepository(config.run.benchmark_root).tasks_by_id()
-    source = _records_by_id(
-        artifacts.candidates(source_reference, source_revision)
-    )
-    checkpoint = JsonlCheckpoint(artifacts.candidates(reference, revision))
-    pending = [
-        task_id
-        for task_id in queries
-        if task_id in source and task_id not in checkpoint.completed
-    ]
-    completed = len(queries) - len(pending)
-    for batch in chunks(pending, config.reranking.task_batch_size):
-        reranked = service.rerank_many(
-            {task_id: queries[task_id] for task_id in batch},
-            {
-                task_id: record_hits(source[task_id])[: config.reranking.input_top_k]
-                for task_id in batch
-            },
-            top_k=config.reranking.output_top_k,
-        )
-        checkpoint.append_many(
-            [ranking_record(tasks[task_id], reranked[task_id]) for task_id in batch]
-        )
-        completed += len(batch)
-        progress(reference, completed, len(queries))
+    return ElserRetriever(gateway), config.retrieval.elser_top_k
 
 
 def _records_by_id(path: Path) -> dict[str, dict]:

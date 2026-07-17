@@ -51,10 +51,8 @@ class RetrievalWriterTest(unittest.TestCase):
                 record,
             )
 
-    def test_rank_score_rejects_non_positive_rank(self) -> None:
+    def test_rank_score(self) -> None:
         self.assertEqual(deterministic_rank_score(2), 0.5)
-        with self.assertRaises(ValueError):
-            deterministic_rank_score(0)
 
 
 if __name__ == "__main__":

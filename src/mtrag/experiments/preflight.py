@@ -61,25 +61,26 @@ def requirements_for(
     stages: Iterable[StageLike] | None,
 ) -> PreflightRequirements:
     if stages is None:
-        return PreflightRequirements(
-            generation_tasks=True,
-            bge_model=True,
-            reranker=True,
-            ollama=True,
-            cuda=True,
-            bge_modes=frozenset(("dense", "sparse")),
-            elser=True,
-        )
-
-    planned = tuple(stages)
-    kinds = {stage.kind for stage in planned}
-    methods = {
-        str(stage.params.get("method"))
-        for stage in planned
-        if stage.kind == "retrieve"
-    }
+        kinds = {
+            "encode",
+            "rerank",
+            "rewrite",
+            "generate",
+            "evaluate_generation_batch",
+        }
+        methods = {"dense", "sparse", "elser"}
+        generation_tasks = True
+    else:
+        planned = tuple(stages)
+        kinds = {stage.kind for stage in planned}
+        methods = {
+            str(stage.params.get("method"))
+            for stage in planned
+            if stage.kind == "retrieve"
+        }
+        generation_tasks = bool(planned)
     return PreflightRequirements(
-        generation_tasks=bool(planned),
+        generation_tasks=generation_tasks,
         bge_model="encode" in kinds,
         reranker="rerank" in kinds,
         ollama=bool(kinds & {"rewrite", "generate"}),
@@ -106,22 +107,19 @@ def _validate_bge_mapping(index: str, mapping: Mapping[str, Any]) -> None:
             "type": "dense_vector",
             "dims": 1024,
             "similarity": "dot_product",
+            "index_options.type": "int8_hnsw",
         }
     else:
         expected = {"type": "sparse_vector"}
+    actual = dict(embedding)
+    actual["index_options.type"] = embedding.get("index_options", {}).get("type")
     mismatched = {
-        key: (embedding.get(key), value)
+        key: (actual.get(key), value)
         for key, value in expected.items()
-        if embedding.get(key) != value
+        if actual.get(key) != value
     }
     if mismatched:
         raise RuntimeError(f"incompatible mapping for {index}: {mismatched}")
-    if index.endswith("-dense"):
-        index_type = embedding.get("index_options", {}).get("type")
-        if index_type != "int8_hnsw":
-            raise RuntimeError(
-                f"incompatible mapping for {index}: index_options.type={index_type}"
-            )
 
 
 def _check_elasticsearch(
@@ -141,15 +139,13 @@ def _check_elasticsearch(
     required = _bge_indices(bge_modes)
     if elser:
         required.update(f"mtrag-{domain}-elser" for domain in DOMAINS)
-    missing = sorted(required - counts.keys())
-    empty = sorted(index for index in required if counts.get(index, 0) <= 0)
-    if missing or empty:
-        details = []
-        if missing:
-            details.append(f"missing={missing}")
-        if empty:
-            details.append(f"empty={empty}")
-        raise RuntimeError("Elasticsearch indices are not ready: " + "; ".join(details))
+    unavailable = {
+        index: counts.get(index)
+        for index in sorted(required)
+        if counts.get(index, 0) <= 0
+    }
+    if unavailable:
+        raise RuntimeError(f"Elasticsearch indices are not ready: {unavailable}")
 
     bge_indices = _bge_indices(bge_modes)
     if bge_indices:

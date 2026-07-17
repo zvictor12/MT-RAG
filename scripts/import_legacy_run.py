@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
+import filecmp
 import shutil
-import tempfile
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from mtrag.data import BenchmarkRepository
+from mtrag.data.jsonl import read_jsonl
 from mtrag.encoding import BgeFeatureStore
-from mtrag.experiments.artifacts import RunArtifacts, read_jsonl
+from mtrag.experiments.artifacts import RunArtifacts
 from mtrag.experiments.planning import PlannedStage, Workflow, build_workflow
 from mtrag.experiments.query_stages import query_cases
 from mtrag.experiments.spec import ExperimentConfig
@@ -54,10 +54,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--trust-current-definition",
         action="store_true",
-        help=(
-            "assert that the legacy files were produced with the current config, "
-            "model revisions and prompts, then register them under current fingerprints"
-        ),
+        help="register legacy files under the current experiment revisions",
     )
     return parser.parse_args()
 
@@ -68,136 +65,69 @@ def main() -> None:
     artifacts = RunArtifacts(args.run_dir.expanduser().resolve())
     workflow = build_workflow(config, schedule=args.schedule)
 
-    _print_inventory(artifacts, workflow)
+    _print_inventory(artifacts.root)
     if not args.trust_current_definition:
         print(
-            "inventory only; no files or completion markers were created. "
-            "Re-run with --trust-current-definition only if these files match "
-            "the current config, prompts and model revisions.",
+            "inventory only; pass --trust-current-definition only when the files "
+            "match the current config, prompts and model revisions.",
             flush=True,
         )
         return
 
-    _import_rewrites(config, artifacts, workflow)
-    _import_features(config, artifacts, workflow)
-    _import_candidates(config, artifacts, workflow)
-    _import_task_b(config, artifacts, workflow)
-
-
-def _print_inventory(artifacts: RunArtifacts, workflow: Workflow) -> None:
-    selected = _selected_legacy_sources(artifacts, workflow)
-    known = _known_legacy_sources(artifacts)
-    discovered = set()
-    for directory in ("candidates", "rewrites", "predictions"):
-        discovered.update((artifacts.root / directory).glob("*.jsonl"))
-    discovered.update(
-        path
-        for path in (
-            artifacts.root / "features" / "bge" / "dense.npz",
-            artifacts.root / "features" / "bge" / "sparse.jsonl",
-        )
-        if path.exists()
-    )
-
-    if not discovered:
-        print("legacy inventory: no files found", flush=True)
-        return
-    print("legacy inventory:", flush=True)
-    for path in sorted(discovered):
-        if path in selected:
-            status = "selected"
-        elif path in known:
-            status = "known"
-        else:
-            status = "ignored"
-        print(f"  {status:8} {_display_path(artifacts.root, path)}", flush=True)
-
-
-def _selected_legacy_sources(
-    artifacts: RunArtifacts,
-    workflow: Workflow,
-) -> set[Path]:
-    stages = workflow.stages
-    outputs = {
-        stage.params["reference"]
-        for stage in stages
-        if stage.kind in {"retrieve", "fuse", "rerank"}
-    }
-    selected = {
-        artifacts.root / "candidates" / f"{old_name}.jsonl"
-        for old_name, reference in LEGACY_CANDIDATES.items()
-        if reference in outputs
-    }
-    rewrite_names = {
-        stage.params["query_name"] for stage in stages if stage.kind == "rewrite"
-    }
-    for query_name in rewrite_names:
-        selected.update(
-            artifacts.root / "rewrites" / filename
-            for filename in LEGACY_REWRITES.get(query_name, ())
-        )
-    if any(stage.kind == "encode" for stage in stages):
-        selected.update(
-            {
-                artifacts.root / "features" / "bge" / "dense.npz",
-                artifacts.root / "features" / "bge" / "sparse.jsonl",
-            }
-        )
-    if any(
-        stage.kind == "generate" and stage.params["job_name"] == "task_b"
-        for stage in stages
-    ):
-        selected.add(artifacts.root / "predictions" / "task_b.jsonl")
-    return selected
-
-
-def _known_legacy_sources(artifacts: RunArtifacts) -> set[Path]:
-    sources = {
-        artifacts.root / "candidates" / f"{name}.jsonl"
-        for name in LEGACY_CANDIDATES
-    }
-    sources.update(
-        artifacts.root / "rewrites" / filename
-        for filenames in LEGACY_REWRITES.values()
-        for filename in filenames
-    )
-    sources.update(
-        {
-            artifacts.root / "features" / "bge" / "dense.npz",
-            artifacts.root / "features" / "bge" / "sparse.jsonl",
-            artifacts.root / "predictions" / "task_b.jsonl",
-        }
-    )
-    return sources
-
-
-def _import_rewrites(
-    config: ExperimentConfig,
-    artifacts: RunArtifacts,
-    workflow: Workflow,
-) -> None:
-    expected_ids = {
+    task_ids = {
         task.task_id
         for task in BenchmarkRepository(config.run.benchmark_root).load_tasks()
     }
+    _import_rewrites(artifacts, workflow, task_ids)
+    _import_features(config, artifacts, workflow)
+    _import_candidates(config, artifacts, workflow)
+    _import_task_b(artifacts, workflow, task_ids)
+
+
+def _print_inventory(root: Path) -> None:
+    files = {
+        path
+        for directory in ("candidates", "rewrites", "predictions")
+        for path in (root / directory).glob("*.jsonl")
+    }
+    files.update(
+        path
+        for path in (
+            root / "features" / "bge" / "dense.npz",
+            root / "features" / "bge" / "sparse.jsonl",
+        )
+        if path.is_file()
+    )
+    if not files:
+        print("legacy inventory: no files found", flush=True)
+        return
+    print("legacy inventory:", flush=True)
+    for path in sorted(files):
+        print(f"  {path.relative_to(root)}", flush=True)
+
+
+def _import_rewrites(
+    artifacts: RunArtifacts,
+    workflow: Workflow,
+    expected_ids: set[str],
+) -> None:
     for stage in workflow.stages:
         if stage.kind != "rewrite":
             continue
         query_name = stage.params["query_name"]
-        source = _first_file(
-            artifacts.root / "rewrites" / filename
-            for filename in LEGACY_REWRITES.get(query_name, ())
+        source = next(
+            (
+                artifacts.root / "rewrites" / filename
+                for filename in LEGACY_REWRITES.get(query_name, ())
+                if (artifacts.root / "rewrites" / filename).is_file()
+            ),
+            None,
         )
         if source is None:
             continue
         target = artifacts.rewrite(query_name, stage.params["query_revision"])
-        _copy_jsonl(
-            source,
-            target,
-            expected_ids=expected_ids,
-            required_fields=("query",),
-        )
-        _mark(artifacts, stage, sources=(source,), targets=(target,))
+        _copy_jsonl(source, target, expected_ids, ("query",))
+        _mark(artifacts, stage)
 
 
 def _import_features(
@@ -206,42 +136,32 @@ def _import_features(
     workflow: Workflow,
 ) -> None:
     legacy = artifacts.root / "features" / "bge"
-    legacy_paths = (legacy / "dense.npz", legacy / "sparse.jsonl")
-    if not any(path.exists() for path in legacy_paths):
+    paths = (legacy / "dense.npz", legacy / "sparse.jsonl")
+    if not any(path.exists() for path in paths):
         return
-    if not all(path.is_file() for path in legacy_paths):
+    if not all(path.is_file() for path in paths):
         raise RuntimeError("legacy BGE feature store is incomplete")
 
-    features = BgeFeatureStore(legacy).load()
-    grouped: dict[str, dict[str, BgeFeatures]] = {
-        query: {} for query in LEGACY_FEATURE_PREFIXES.values()
-    }
-    for key, value in features.items():
+    grouped: dict[str, dict[str, BgeFeatures]] = {}
+    for key, value in BgeFeatureStore(legacy).load().items():
         prefix, separator, task_id = key.partition(":")
         query_name = LEGACY_FEATURE_PREFIXES.get(prefix)
-        if separator and query_name is not None:
-            grouped[query_name][task_id] = value
+        if separator and query_name:
+            grouped.setdefault(query_name, {})[task_id] = value
 
     for stage in workflow.stages:
         if stage.kind != "encode":
             continue
         query_name = stage.params["query_name"]
-        imported = grouped.get(query_name, {})
-        if not imported:
+        features = grouped.get(query_name)
+        if not features:
             continue
         expected_ids = _query_ids(config, artifacts, workflow, query_name)
-        _require_exact_ids(
-            imported,
-            expected_ids,
-            f"legacy BGE features for {query_name}",
-        )
-        target = artifacts.bge_features(
-            query_name,
-            stage.params["feature_revision"],
-        )
-        _copy_feature_store(imported, target)
-        target_paths = (target / "dense.npz", target / "sparse.jsonl")
-        _mark(artifacts, stage, sources=legacy_paths, targets=target_paths)
+        if set(features) != expected_ids:
+            raise RuntimeError(f"legacy BGE features do not match {query_name!r}")
+        target = artifacts.bge_features(query_name, stage.params["feature_revision"])
+        _save_features(features, target)
+        _mark(artifacts, stage)
 
 
 def _import_candidates(
@@ -249,28 +169,27 @@ def _import_candidates(
     artifacts: RunArtifacts,
     workflow: Workflow,
 ) -> None:
-    stages = _stages_by_output(workflow.stages)
-    for old_name, reference in LEGACY_CANDIDATES.items():
+    stages = {
+        stage.params["reference"]: stage
+        for stage in workflow.stages
+        if stage.kind in {"retrieve", "fuse", "rerank"}
+    }
+    for legacy_name, reference in LEGACY_CANDIDATES.items():
         stage = stages.get(reference)
-        source = artifacts.root / "candidates" / f"{old_name}.jsonl"
+        source = artifacts.root / "candidates" / f"{legacy_name}.jsonl"
         if stage is None or not source.is_file():
             continue
-        pipeline, _output = config.resolve_retrieval_output(reference)
+        pipeline, _ = config.resolve_retrieval_output(reference)
         expected_ids = _query_ids(config, artifacts, workflow, pipeline.query)
         target = artifacts.candidates(reference, stage.params["revision"])
-        _copy_jsonl(
-            source,
-            target,
-            expected_ids=expected_ids,
-            required_fields=("contexts",),
-        )
-        _mark(artifacts, stage, sources=(source,), targets=(target,))
+        _copy_jsonl(source, target, expected_ids, ("contexts",))
+        _mark(artifacts, stage)
 
 
 def _import_task_b(
-    config: ExperimentConfig,
     artifacts: RunArtifacts,
     workflow: Workflow,
+    expected_ids: set[str],
 ) -> None:
     stage = next(
         (
@@ -283,18 +202,9 @@ def _import_task_b(
     source = artifacts.root / "predictions" / "task_b.jsonl"
     if stage is None or not source.is_file():
         return
-    expected_ids = {
-        task.task_id
-        for task in BenchmarkRepository(config.run.benchmark_root).load_tasks()
-    }
     target = artifacts.generation("task_b", stage.params["revision"])
-    _copy_jsonl(
-        source,
-        target,
-        expected_ids=expected_ids,
-        required_fields=("predictions",),
-    )
-    _mark(artifacts, stage, sources=(source,), targets=(target,))
+    _copy_jsonl(source, target, expected_ids, ("predictions",))
+    _mark(artifacts, stage)
 
 
 def _query_ids(
@@ -309,188 +219,55 @@ def _query_ids(
         if stage.kind == "encode" and stage.params["query_name"] == query_name
     )
     return {
-        case.task_id
-        for case in query_cases(config, artifacts, query_name, revision)
+        case.task_id for case in query_cases(config, artifacts, query_name, revision)
     }
-
-
-def _stages_by_output(stages: Sequence[PlannedStage]) -> dict[str, PlannedStage]:
-    return {
-        stage.params["reference"]: stage
-        for stage in stages
-        if stage.kind in {"retrieve", "fuse", "rerank"}
-    }
-
-
-def _first_file(paths: Iterable[Path]) -> Path | None:
-    return next((path for path in paths if path.is_file()), None)
 
 
 def _copy_jsonl(
     source: Path,
     target: Path,
-    *,
     expected_ids: set[str],
     required_fields: Sequence[str],
 ) -> None:
-    _validate_jsonl(source, expected_ids, required_fields)
-    _copy_file(source, target)
-    _validate_jsonl(target, expected_ids, required_fields)
-    if _sha256(source) != _sha256(target):
-        raise RuntimeError(f"legacy copy differs from its source: {target}")
-
-
-def _validate_jsonl(
-    path: Path,
-    expected_ids: set[str],
-    required_fields: Sequence[str],
-) -> None:
-    records = read_jsonl(path)
-    if not records:
-        raise RuntimeError(f"legacy artifact is empty: {path}")
-    ids: dict[str, None] = {}
-    for record in records:
-        task_id = record.get("task_id")
-        if not isinstance(task_id, str) or not task_id:
-            raise RuntimeError(f"legacy artifact has no task_id: {path}")
-        if task_id in ids:
-            raise RuntimeError(
-                f"legacy artifact has duplicate task_id {task_id!r}: {path}"
-            )
-        missing = [field for field in required_fields if field not in record]
-        if missing:
-            raise RuntimeError(f"legacy artifact is missing {missing[0]!r}: {path}")
-        ids[task_id] = None
-    _require_exact_ids(ids, expected_ids, str(path))
-
-
-def _require_exact_ids(
-    records: Mapping[str, object],
-    expected_ids: set[str],
-    label: str,
-) -> None:
-    actual_ids = set(records)
-    if actual_ids == expected_ids:
-        return
-    missing = expected_ids - actual_ids
-    extra = actual_ids - expected_ids
-    raise RuntimeError(
-        f"{label} is incomplete or incompatible: "
-        f"expected={len(expected_ids)}, actual={len(actual_ids)}, "
-        f"missing={len(missing)}, extra={len(extra)}"
+    records = read_jsonl(source)
+    task_ids = [record.get("task_id") for record in records]
+    valid = (
+        all(isinstance(task_id, str) for task_id in task_ids)
+        and len(task_ids) == len(set(task_ids))
+        and set(task_ids) == expected_ids
+        and all(all(field in record for field in required_fields) for record in records)
     )
+    if not valid:
+        raise RuntimeError(f"legacy artifact is incomplete or incompatible: {source}")
+    _copy_file(source, target)
 
 
 def _copy_file(source: Path, target: Path) -> None:
-    if not source.is_file() or source.stat().st_size == 0:
-        raise RuntimeError(f"legacy source is missing or empty: {source}")
-    source_hash = _sha256(source)
     if target.exists():
-        if not target.is_file() or _sha256(target) != source_hash:
+        if not target.is_file() or not filecmp.cmp(source, target, shallow=False):
             raise RuntimeError(f"current revision target already differs: {target}")
-        _make_read_only(target)
-        print(f"verified existing {target}", flush=True)
+        print(f"reused {target}", flush=True)
         return
-
     target.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        prefix=f".{target.name}.",
-        suffix=".tmp",
-        dir=target.parent,
-        delete=False,
-    ) as handle:
-        temporary = Path(handle.name)
-    try:
-        shutil.copy2(source, temporary)
-        if _sha256(temporary) != source_hash:
-            raise RuntimeError(f"legacy copy verification failed: {target}")
-        temporary.replace(target)
-    finally:
-        temporary.unlink(missing_ok=True)
-    _make_read_only(target)
+    shutil.copy2(source, target)
     print(f"copied {source} -> {target}", flush=True)
 
 
-def _copy_feature_store(
-    features: Mapping[str, BgeFeatures],
-    target: Path,
-) -> None:
+def _save_features(features: Mapping[str, BgeFeatures], target: Path) -> None:
     if target.exists():
-        if not target.is_dir() or BgeFeatureStore(target).load() != dict(features):
+        if BgeFeatureStore(target).load() != dict(features):
             raise RuntimeError(f"current feature revision already differs: {target}")
-        _make_read_only(target / "dense.npz")
-        _make_read_only(target / "sparse.jsonl")
-        print(f"verified existing {target}", flush=True)
+        print(f"reused {target}", flush=True)
         return
-
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = Path(tempfile.mkdtemp(prefix=f".{target.name}.", dir=target.parent))
-    try:
-        BgeFeatureStore(temporary).save(features)
-        if BgeFeatureStore(temporary).load() != dict(features):
-            raise RuntimeError(f"legacy feature copy verification failed: {target}")
-        temporary.replace(target)
-    finally:
-        shutil.rmtree(temporary, ignore_errors=True)
-    if BgeFeatureStore(target).load() != dict(features):
-        raise RuntimeError(f"legacy feature target is incomplete: {target}")
-    _make_read_only(target / "dense.npz")
-    _make_read_only(target / "sparse.jsonl")
+    BgeFeatureStore(target).save(features)
     print(f"copied legacy BGE features -> {target}", flush=True)
 
 
-def _mark(
-    artifacts: RunArtifacts,
-    stage: PlannedStage,
-    *,
-    sources: Sequence[Path],
-    targets: Sequence[Path],
-) -> None:
-    for target in targets:
-        if not target.is_file() or target.stat().st_size == 0:
-            raise RuntimeError(f"refusing to mark incomplete target: {target}")
+def _mark(artifacts: RunArtifacts, stage: PlannedStage) -> None:
     write_json_atomic(
         artifacts.stage_marker(stage.fingerprint),
-        {
-            "stage": stage.name,
-            "kind": stage.kind,
-            "fingerprint": stage.fingerprint,
-            "params": stage.params,
-            "imported_from_legacy": True,
-            "legacy_import": {
-                "trust_current_definition": True,
-                "sources": [_file_manifest(artifacts.root, path) for path in sources],
-                "targets": [_file_manifest(artifacts.root, path) for path in targets],
-            },
-        },
+        {"stage": stage.name, "imported_from_legacy": True},
     )
-
-
-def _file_manifest(root: Path, path: Path) -> dict[str, object]:
-    return {
-        "path": _display_path(root, path),
-        "size": path.stat().st_size,
-        "sha256": _sha256(path),
-    }
-
-
-def _display_path(root: Path, path: Path) -> str:
-    try:
-        return str(path.relative_to(root))
-    except ValueError:
-        return str(path)
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _make_read_only(path: Path) -> None:
-    path.chmod(path.stat().st_mode & ~0o222)
 
 
 if __name__ == "__main__":

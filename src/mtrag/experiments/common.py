@@ -36,12 +36,21 @@ def ollama_client(config: ExperimentConfig) -> OllamaClient:
     return OllamaClient(client_settings)
 
 
-def ollama_identity(config: ExperimentConfig) -> str:
+def ollama_model_info(
+    config: ExperimentConfig,
+) -> tuple[str, dict[str, str | int]]:
     model = config.models
-    return (
+    identity = (
         f"{model.ollama_model}@{model.ollama_digest}:"
         f"ctx={model.ollama_num_ctx}:seed={model.ollama_seed}"
     )
+    provenance = {
+        "model": model.ollama_model,
+        "model_digest": model.ollama_digest,
+        "num_ctx": model.ollama_num_ctx,
+        "seed": model.ollama_seed,
+    }
+    return identity, provenance
 
 
 def chunks[T](values: list[T], size: int):
