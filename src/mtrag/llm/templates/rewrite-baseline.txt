@@ -8,3 +8,7 @@ Rules:
 3. Keep the rewritten query concise and search-friendly.
 4. Do not add information not present in the conversation.
 5. If the question is already standalone, return it unchanged.
+
+Do not answer the current question. Return only the rewritten query as plain text.
+Do not wrap it in JSON, quotes, Markdown, or a code block.
+Do not provide analysis, reasoning, or explanation.

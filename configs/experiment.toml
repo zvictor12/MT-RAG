@@ -33,7 +33,7 @@ kind = "gold"
 
 [queries.qwen_t0]
 kind = "rewrite"
-prompt = "src/mtrag/llm/templates/rewrite-v2.txt"
+prompt = "src/mtrag/llm/templates/rewrite-baseline.txt"
 temperature = 0.0
 max_tokens = 128
 
@@ -91,6 +91,12 @@ generator = "qwen"
 contexts = "bge_t02.rrf_reranked"
 evaluate = true
 
+[generation.task_c_bge_t0_legacy]
+task = "c"
+generator = "qwen"
+contexts = "bge_t0.rrf_reranked"
+evaluate = true
+
 [generation.task_c_elser_last]
 task = "c"
 generator = "qwen"
@@ -136,6 +142,19 @@ generation = ["task_c_bge_last", "task_c_bge_t02"]
 [schedules.elser_task_c]
 task_a = []
 generation = ["task_c_elser_last", "task_c_elser_t02"]
+
+[schedules.overnight_2]
+task_a = [
+    "bge_gold.dense",
+    "bge_last.dense",
+    "bge_t0.dense",
+    "bge_t0.sparse",
+    "bge_t0.rrf",
+    "bge_t0.rrf_reranked",
+    "bge_t02.dense",
+    "bge_t02.rrf",
+]
+generation = ["task_b", "task_c_bge_t0_legacy", "task_c_bge_last"]
 
 [retrieval]
 bge_index_revision = "kaggle-bge-m3-v1"

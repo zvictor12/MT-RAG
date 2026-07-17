@@ -4,8 +4,8 @@ import unittest
 from pathlib import Path
 
 from mtrag.experiments.artifacts import RunArtifacts
-from mtrag.experiments.planning import PlannedStage
-from scripts.import_legacy_run import _copy_jsonl, _mark
+from mtrag.experiments.planning import PlannedStage, Workflow
+from scripts.import_legacy_run import _copy_jsonl, _import_generations, _mark
 
 
 class LegacyImportTest(unittest.TestCase):
@@ -71,6 +71,31 @@ class LegacyImportTest(unittest.TestCase):
             marker = json.loads(artifacts.stage_marker(self.revision).read_text())
             self.assertEqual(marker["stage"], stage.name)
             self.assertTrue(marker["imported_from_legacy"])
+
+    def test_legacy_task_c_is_imported_as_an_evaluation_job(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            artifacts = RunArtifacts(Path(directory))
+            source = artifacts.root / "predictions" / "task_c_bge.jsonl"
+            source.parent.mkdir(parents=True)
+            source.write_text(
+                json.dumps({"task_id": "one", "predictions": [{"text": "answer"}]})
+                + "\n"
+            )
+            stage = PlannedStage(
+                name="generate.task_c_bge_t0_legacy@aaaaaaaa",
+                kind="generate",
+                fingerprint=self.revision,
+                params={
+                    "job_name": "task_c_bge_t0_legacy",
+                    "revision": self.revision,
+                },
+            )
+
+            _import_generations(artifacts, Workflow((stage,)), {"one"})
+
+            target = artifacts.generation("task_c_bge_t0_legacy", self.revision)
+            self.assertEqual(target.read_bytes(), source.read_bytes())
+            self.assertTrue(artifacts.stage_marker(self.revision).is_file())
 
 
 if __name__ == "__main__":

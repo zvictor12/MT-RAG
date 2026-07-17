@@ -42,6 +42,10 @@ LEGACY_FEATURE_PREFIXES = {
     "qwen": "qwen_t0",
     "qwen_t02": "qwen_t02",
 }
+LEGACY_GENERATIONS = {
+    "task_b": "task_b.jsonl",
+    "task_c_bge_t0_legacy": "task_c_bge.jsonl",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -81,7 +85,7 @@ def main() -> None:
     _import_rewrites(artifacts, workflow, task_ids)
     _import_features(config, artifacts, workflow)
     _import_candidates(config, artifacts, workflow)
-    _import_task_b(artifacts, workflow, task_ids)
+    _import_generations(artifacts, workflow, task_ids)
 
 
 def _print_inventory(root: Path) -> None:
@@ -186,25 +190,24 @@ def _import_candidates(
         _mark(artifacts, stage)
 
 
-def _import_task_b(
+def _import_generations(
     artifacts: RunArtifacts,
     workflow: Workflow,
     expected_ids: set[str],
 ) -> None:
-    stage = next(
-        (
-            item
-            for item in workflow.stages
-            if item.kind == "generate" and item.params["job_name"] == "task_b"
-        ),
-        None,
-    )
-    source = artifacts.root / "predictions" / "task_b.jsonl"
-    if stage is None or not source.is_file():
-        return
-    target = artifacts.generation("task_b", stage.params["revision"])
-    _copy_jsonl(source, target, expected_ids, ("predictions",))
-    _mark(artifacts, stage)
+    stages = {
+        stage.params["job_name"]: stage
+        for stage in workflow.stages
+        if stage.kind == "generate"
+    }
+    for job_name, filename in LEGACY_GENERATIONS.items():
+        stage = stages.get(job_name)
+        source = artifacts.root / "predictions" / filename
+        if stage is None or not source.is_file():
+            continue
+        target = artifacts.generation(job_name, stage.params["revision"])
+        _copy_jsonl(source, target, expected_ids, ("predictions",))
+        _mark(artifacts, stage)
 
 
 def _query_ids(

@@ -36,14 +36,7 @@ class PromptTests(unittest.TestCase):
         self.assertEqual(request["final_user_question"], "Can it store arbitrary JSON?")
         self.assertEqual(request["conversation_history"][1]["speaker"], "assistant")
         self.assertNotIn("Can it store arbitrary JSON?", str(request["conversation_history"]))
-        self.assertIn("Do not answer", messages[0]["content"])
-        self.assertIn("Do not provide analysis", messages[0]["content"])
-
-    def test_rewriter_requests_plain_text_output(self) -> None:
-        messages = build_rewrite_messages(sample_task())
-
-        self.assertIn("as plain text", messages[0]["content"])
-        self.assertIn("Do not wrap it in JSON", messages[0]["content"])
+        self.assertEqual(messages[0]["content"], DEFAULT_REWRITE_PROMPT.text)
 
     def test_generator_prompt_contains_grounding_data(self) -> None:
         context = Context("doc-1", "Cloudant stores JSON.", title="Cloudant")
@@ -60,7 +53,7 @@ class PromptTests(unittest.TestCase):
         self.assertEqual(GENERATOR_PROMPT_VERSION, "qwen-grounded-generation-v1")
         self.assertEqual(
             DEFAULT_REWRITE_PROMPT.sha256,
-            "2589d034dacd2be4783c3826f0f9c62ddc94ed6d935532088073c73794523e18",
+            "5178e17f63f99edb75425a73359edc16ef3a87bd616fed9c0d01a30ec3c38270",
         )
         self.assertEqual(
             DEFAULT_GENERATOR_PROMPT.sha256,
