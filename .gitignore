@@ -1,0 +1,12 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Elasticsearch repositories contain large runtime artifacts.
+artifacts/elasticsearch/archives/**
+artifacts/elasticsearch/snapshots/**
+!artifacts/elasticsearch/snapshots/**/
+!artifacts/elasticsearch/snapshots/**/.gitkeep
