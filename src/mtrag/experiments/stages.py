@@ -1,84 +1,35 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from mtrag.experiments.artifacts import RunArtifacts
 from mtrag.experiments.generation_stages import (
-    evaluate_generation,
-    evaluate_generation_bge,
-    evaluate_generation_bge_last,
-    evaluate_generation_bge_selected,
-    generate_task_b,
-    generate_task_c,
-    generate_task_c_bge,
-    generate_task_c_bge_last,
-    generate_task_c_bge_selected,
+    evaluate_generation_jobs,
+    generate_job,
+    unload_ollama,
 )
-from mtrag.experiments.query_stages import (
-    encode_bge,
-    encode_bge_variants,
-    rewrite_qwen,
-    rewrite_qwen_t02,
-)
+from mtrag.experiments.planning import Workflow
+from mtrag.experiments.query_stages import encode_bge_query, rewrite_query
 from mtrag.experiments.retrieval_stages import (
-    decide_bge_variants,
-    decide_reranker,
-    evaluate_bge_base,
-    evaluate_bge_rerank,
-    evaluate_bge_variants_base,
-    evaluate_bge_variants_rerank,
-    evaluate_elser_base,
-    evaluate_elser_rerank,
-    fuse_bge,
-    fuse_bge_variants,
-    rerank_bge,
-    rerank_bge_variants,
-    rerank_elser,
-    retrieve_bge,
-    retrieve_bge_variants,
-    retrieve_elser,
-    select_bge,
-    select_bge_variants,
-    select_rewrite_variant,
-    select_winner,
+    evaluate_task_a,
+    fuse,
+    rerank,
+    retrieve,
 )
 from mtrag.experiments.spec import ExperimentConfig
-from mtrag.experiments.preflight import preflight
+from mtrag.runtime.state import write_json_atomic
 
 
-STAGES = {
-    "preflight": preflight,
-    "rewrite_qwen": rewrite_qwen,
-    "rewrite_qwen_t02": rewrite_qwen_t02,
-    "encode_bge": encode_bge,
-    "encode_bge_variants": encode_bge_variants,
-    "retrieve_elser": retrieve_elser,
-    "retrieve_bge": retrieve_bge,
-    "retrieve_bge_variants": retrieve_bge_variants,
-    "fuse_bge": fuse_bge,
-    "fuse_bge_variants": fuse_bge_variants,
-    "evaluate_bge_base": evaluate_bge_base,
-    "evaluate_bge_variants_base": evaluate_bge_variants_base,
-    "evaluate_elser_base": evaluate_elser_base,
-    "rerank_bge": rerank_bge,
-    "rerank_bge_variants": rerank_bge_variants,
-    "evaluate_bge_rerank": evaluate_bge_rerank,
-    "evaluate_bge_variants_rerank": evaluate_bge_variants_rerank,
-    "decide_reranker": decide_reranker,
-    "decide_bge_variants": decide_bge_variants,
-    "select_bge": select_bge,
-    "select_bge_variants": select_bge_variants,
-    "select_rewrite_variant": select_rewrite_variant,
-    "rerank_elser": rerank_elser,
-    "evaluate_elser_rerank": evaluate_elser_rerank,
-    "select_winner": select_winner,
-    "generate_task_b": generate_task_b,
-    "generate_task_c_bge": generate_task_c_bge,
-    "evaluate_generation_bge": evaluate_generation_bge,
-    "generate_task_c_bge_last": generate_task_c_bge_last,
-    "evaluate_generation_bge_last": evaluate_generation_bge_last,
-    "generate_task_c_bge_selected": generate_task_c_bge_selected,
-    "evaluate_generation_bge_selected": evaluate_generation_bge_selected,
-    "generate_task_c": generate_task_c,
-    "evaluate_generation": evaluate_generation,
+EXECUTORS: dict[str, Callable] = {
+    "rewrite": rewrite_query,
+    "encode": encode_bge_query,
+    "retrieve": retrieve,
+    "fuse": fuse,
+    "rerank": rerank,
+    "evaluate_task_a": evaluate_task_a,
+    "generate": generate_job,
+    "unload_ollama": unload_ollama,
+    "evaluate_generation_batch": evaluate_generation_jobs,
 }
 
 
@@ -86,9 +37,13 @@ def run_stage(
     name: str,
     config: ExperimentConfig,
     artifacts: RunArtifacts,
+    *,
+    workflow: Workflow,
 ) -> None:
-    try:
-        stage = STAGES[name]
-    except KeyError as error:
-        raise ValueError(f"unknown experiment stage: {name}") from error
-    stage(config, artifacts)
+    stage = workflow.stage(name)
+    marker = artifacts.stage_marker(stage.fingerprint)
+    if stage.kind != "unload_ollama" and marker.is_file():
+        print(f"reused {stage.name}", flush=True)
+        return
+    EXECUTORS[stage.kind](config, artifacts, **stage.params)
+    write_json_atomic(marker, {"stage": stage.name})

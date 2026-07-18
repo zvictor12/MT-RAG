@@ -1,3 +1,0 @@
-
-[2026-07-17T01:23:28.979810+00:00] $ /home/victor/dev/GitHub/mt-rag/.venv/bin/python3 /home/victor/dev/GitHub/mt-rag/scripts/run_experiment.py stage decide_reranker --config /home/victor/dev/GitHub/mt-rag/configs/experiment.toml --run-dir /home/victor/dev/GitHub/mt-rag/runs/main
-reranker gate: enabled

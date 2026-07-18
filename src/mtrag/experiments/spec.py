@@ -3,118 +3,150 @@ from __future__ import annotations
 import os
 import re
 import tomllib
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, cast
 
 
-def _section(document: Mapping[str, Any], name: str) -> Mapping[str, Any]:
-    value = document.get(name, {})
-    if not isinstance(value, Mapping):
-        raise ValueError(f"TOML section [{name}] must be a table")
-    return value
+_SAFE_NAME = re.compile(r"[a-z][a-z0-9_]*")
+
+PIPELINE_OUTPUTS = {
+    "bge": {"dense", "sparse", "rrf", "rrf_reranked"},
+    "elser": {"base", "reranked"},
+}
+QUERY_KINDS = {"last_turn", "last_turn_all", "gold", "rewrite", "agentic"}
 
 
 def _path(value: str, project_root: Path) -> Path:
-    expanded = Path(os.path.expandvars(value)).expanduser()
-    return expanded if expanded.is_absolute() else project_root / expanded
+    path = Path(os.path.expandvars(value)).expanduser()
+    return path if path.is_absolute() else project_root / path
+
+
+def _named_tables(
+    document: Mapping[str, Any], section: str
+) -> Iterator[tuple[str, Mapping[str, Any]]]:
+    tables = document.get(section, {})
+    if not isinstance(tables, Mapping):
+        raise ValueError(f"TOML section [{section}] must be a table")
+    for name, table in tables.items():
+        if not isinstance(table, Mapping):
+            raise ValueError(f"TOML section [{section}.{name}] must be a table")
+        yield name, table
 
 
 @dataclass(frozen=True, slots=True)
 class RunConfig:
-    name: str
-    output_root: Path
-    benchmark_root: Path
-    cpu_slots: int
+    name: str = "main"
+    output_root: Path = Path("runs")
+    benchmark_root: Path = Path("../mt-rag-benchmark")
+    cpu_slots: int = 4
 
 
 @dataclass(frozen=True, slots=True)
 class ServiceConfig:
-    elasticsearch_url: str
-    elser_inference_id: str
-    ollama_url: str
+    elasticsearch_url: str = "http://127.0.0.1:9200"
+    elser_inference_id: str = "mtrag-elser"
+    ollama_url: str = "http://127.0.0.1:11434"
 
 
 @dataclass(frozen=True, slots=True)
 class ModelConfig:
-    bge_path: Path
-    bge_revision: str
-    bge_batch_size: int
-    bge_max_length: int
-    reranker_path: Path
-    reranker_revision: str
-    reranker_batch_size: int
-    reranker_max_length: int
-    ollama_model: str
-    ollama_digest: str
-    ollama_num_ctx: int
-    ollama_keep_alive: str
-    ollama_seed: int
-    ollama_timeout: int
+    bge_path: Path = Path("~/.cache/mtrag/models/bge-m3")
+    bge_revision: str = "local"
+    bge_batch_size: int = 32
+    bge_max_length: int = 512
+    reranker_path: Path = Path("~/.cache/mtrag/models/bge-reranker-v2-m3")
+    reranker_revision: str = "local"
+    reranker_batch_size: int = 8
+    reranker_max_length: int = 512
+    ollama_model: str = "qwen3.5:4b-q4_K_M"
+    ollama_digest: str = ""
+    ollama_num_ctx: int = 8192
+    ollama_keep_alive: str = "10m"
+    ollama_seed: int = 42
+    ollama_timeout: int = 600
 
 
 @dataclass(frozen=True, slots=True)
-class RewriteVariantConfig:
+class QueryConfig:
     name: str
-    temperature: float
+    kind: str
+    prompt: Path | None = None
+    answer_prompt: Path | None = None
+    compose_prompt: Path | None = None
+    temperature: float | None = None
+    max_tokens: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
-class RewritingConfig:
-    max_tokens: int
-    variants: tuple[RewriteVariantConfig, ...]
+class PipelineConfig:
+    name: str
+    kind: str
+    query: str
 
-    def variant(self, name: str) -> RewriteVariantConfig:
-        for variant in self.variants:
-            if variant.name == name:
-                return variant
-        raise ValueError(f"unknown rewrite variant: {name}")
+
+@dataclass(frozen=True, slots=True)
+class GeneratorConfig:
+    name: str
+    prompt: Path
+    temperature: float
+    max_tokens: int
+    context_top_k: int
+
+
+@dataclass(frozen=True, slots=True)
+class GenerationJobConfig:
+    name: str
+    task: str
+    generator: str
+    contexts: str
+    evaluate: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduleConfig:
+    name: str
+    task_a: tuple[str, ...]
+    generation: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class RetrievalConfig:
-    dense_top_k: int
-    dense_candidate_multiplier: int
-    dense_rescore_oversample: float
-    sparse_top_k: int
-    elser_top_k: int
-    rrf_top_k: int
-    rrf_rank_constant: int
-    prediction_top_k: int
-    request_batch_size: int
+    bge_index_revision: str = ""
+    elser_index_revision: str = ""
+    dense_top_k: int = 50
+    dense_candidate_multiplier: int = 10
+    dense_rescore_oversample: float = 2.0
+    sparse_top_k: int = 50
+    elser_top_k: int = 20
+    rrf_top_k: int = 20
+    rrf_rank_constant: int = 60
+    prediction_top_k: int = 10
+    request_batch_size: int = 64
 
 
 @dataclass(frozen=True, slots=True)
 class RerankingConfig:
-    input_top_k: int
-    output_top_k: int
-    task_batch_size: int
-    minimum_ndcg5_gain: float
-    minimum_improvement_probability: float
-    bootstrap_samples: int
-    bootstrap_seed: int
+    input_top_k: int = 20
+    output_top_k: int = 10
+    task_batch_size: int = 32
 
 
 @dataclass(frozen=True, slots=True)
-class GenerationConfig:
-    context_top_k: int
-    max_tokens: int
-    temperature: float
-    run_algorithmic_metrics: bool
-    bertscore_model: str
-    bertscore_batch_size: int
+class EvaluationConfig:
+    bertscore_model: str = "microsoft/deberta-xlarge-mnli"
+    bertscore_batch_size: int = 2
 
 
 @dataclass(frozen=True, slots=True)
 class ThermalConfig:
-    gpu_pause: float
-    gpu_resume: float
-    gpu_abort: float
-    cpu_pause: float
-    cpu_resume: float
-    cpu_abort: float
-    poll_interval: float
-    resume_hold: float
+    gpu_pause: float = 80.0
+    gpu_resume: float = 72.0
+    cpu_pause: float = 90.0
+    cpu_resume: float = 80.0
+    poll_interval: float = 5.0
+    resume_hold: float = 30.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,151 +156,131 @@ class ExperimentConfig:
     run: RunConfig
     services: ServiceConfig
     models: ModelConfig
-    rewriting: RewritingConfig
+    queries: dict[str, QueryConfig]
+    pipelines: dict[str, PipelineConfig]
+    generators: dict[str, GeneratorConfig]
+    generation_jobs: dict[str, GenerationJobConfig]
+    schedules: dict[str, ScheduleConfig]
     retrieval: RetrievalConfig
     reranking: RerankingConfig
-    generation: GenerationConfig
+    evaluation: EvaluationConfig
     thermal: ThermalConfig
 
     @classmethod
     def load(cls, path: str | Path) -> "ExperimentConfig":
         config_path = Path(path).expanduser().resolve()
-        document = tomllib.loads(config_path.read_text(encoding="utf-8"))
         project_root = config_path.parent.parent
+        document = tomllib.loads(config_path.read_text(encoding="utf-8"))
 
-        run = _section(document, "run")
-        services = _section(document, "services")
-        models = _section(document, "models")
-        rewriting = _section(document, "rewriting")
-        rewrite_variants = _section(rewriting, "variants")
-        if not rewrite_variants:
-            rewrite_variants = {
-                "qwen_t0": {"temperature": 0.0},
-                "qwen_t02": {"temperature": 0.2},
-            }
-        retrieval = _section(document, "retrieval")
-        reranking = _section(document, "reranking")
-        generation = _section(document, "generation")
-        thermal = _section(document, "thermal")
+        sections: dict[str, dict[str, Any]] = {}
+        for name in (
+            "run", "services", "models", "retrieval", "reranking",
+            "evaluation", "thermal",
+        ):
+            table = document.get(name, {})
+            if not isinstance(table, Mapping):
+                raise ValueError(f"TOML section [{name}] must be a table")
+            sections[name] = dict(table)
+
+        run = sections["run"]
+        run_defaults = RunConfig()
+        run["output_root"] = _path(
+            str(run.get("output_root", run_defaults.output_root)), project_root
+        )
+        run["benchmark_root"] = _path(
+            str(run.get("benchmark_root", run_defaults.benchmark_root)), project_root
+        )
+
+        services = sections["services"]
+        service_defaults = ServiceConfig()
+        for name in ("elasticsearch_url", "ollama_url"):
+            services[name] = str(
+                services.get(name, getattr(service_defaults, name))
+            ).rstrip("/")
+
+        models = sections["models"]
+        model_defaults = ModelConfig()
+        for name in ("bge_path", "reranker_path"):
+            models[name] = _path(
+                str(models.get(name, getattr(model_defaults, name))), project_root
+            )
+
+        queries: dict[str, QueryConfig] = {}
+        for name, table in _named_tables(document, "queries"):
+            kind = table.get("kind", "")
+            if kind not in {"rewrite", "agentic"}:
+                queries[name] = QueryConfig(name=name, kind=str(kind))
+                continue
+            queries[name] = QueryConfig(
+                name=name,
+                kind=str(kind),
+                prompt=_path(str(table.get("prompt", "")), project_root),
+                answer_prompt=(
+                    _path(str(table.get("answer_prompt", "")), project_root)
+                    if kind == "agentic"
+                    else None
+                ),
+                compose_prompt=(
+                    _path(str(table.get("compose_prompt", "")), project_root)
+                    if kind == "agentic"
+                    else None
+                ),
+                temperature=float(table.get("temperature", 0.0)),
+                max_tokens=int(table.get("max_tokens", 128)),
+            )
+
+        pipelines = {
+            name: PipelineConfig(
+                name=name,
+                kind=str(table.get("kind", "")),
+                query=str(table.get("query", "")),
+            )
+            for name, table in _named_tables(document, "pipelines")
+        }
+        generators = {
+            name: GeneratorConfig(
+                name=name,
+                prompt=_path(str(table.get("prompt", "")), project_root),
+                temperature=float(table.get("temperature", 0.0)),
+                max_tokens=int(table.get("max_tokens", 512)),
+                context_top_k=int(table.get("context_top_k", 5)),
+            )
+            for name, table in _named_tables(document, "generators")
+        }
+        generation_jobs = {
+            name: GenerationJobConfig(
+                name=name,
+                task=str(table.get("task", "")),
+                generator=str(table.get("generator", "")),
+                contexts=str(table.get("contexts", "")),
+                evaluate=cast(bool, table.get("evaluate", True)),
+            )
+            for name, table in _named_tables(document, "generation")
+        }
+        schedules = {
+            name: ScheduleConfig(
+                name=name,
+                task_a=tuple(cast(list[str], table.get("task_a", []))),
+                generation=tuple(cast(list[str], table.get("generation", []))),
+            )
+            for name, table in _named_tables(document, "schedules")
+        }
 
         config = cls(
             path=config_path,
             project_root=project_root,
-            run=RunConfig(
-                name=str(run.get("name", "main")),
-                output_root=_path(str(run.get("output_root", "runs")), project_root),
-                benchmark_root=_path(
-                    str(run.get("benchmark_root", "../mt-rag-benchmark")),
-                    project_root,
-                ),
-                cpu_slots=int(run.get("cpu_slots", 4)),
-            ),
-            services=ServiceConfig(
-                elasticsearch_url=str(
-                    services.get("elasticsearch_url", "http://127.0.0.1:9200")
-                ).rstrip("/"),
-                elser_inference_id=str(
-                    services.get("elser_inference_id", "mtrag-elser")
-                ),
-                ollama_url=str(
-                    services.get("ollama_url", "http://127.0.0.1:11434")
-                ).rstrip("/"),
-            ),
-            models=ModelConfig(
-                bge_path=_path(
-                    str(models.get("bge_path", "~/.cache/mtrag/models/bge-m3")),
-                    project_root,
-                ),
-                bge_revision=str(models.get("bge_revision", "local")),
-                bge_batch_size=int(models.get("bge_batch_size", 32)),
-                bge_max_length=int(models.get("bge_max_length", 512)),
-                reranker_path=_path(
-                    str(
-                        models.get(
-                            "reranker_path",
-                            "~/.cache/mtrag/models/bge-reranker-v2-m3",
-                        )
-                    ),
-                    project_root,
-                ),
-                reranker_revision=str(models.get("reranker_revision", "local")),
-                reranker_batch_size=int(models.get("reranker_batch_size", 8)),
-                reranker_max_length=int(models.get("reranker_max_length", 512)),
-                ollama_model=str(models.get("ollama_model", "qwen3.5:4b-q4_K_M")),
-                ollama_digest=str(models.get("ollama_digest", "")),
-                ollama_num_ctx=int(models.get("ollama_num_ctx", 8192)),
-                ollama_keep_alive=str(models.get("ollama_keep_alive", "10m")),
-                ollama_seed=int(models.get("ollama_seed", 42)),
-                ollama_timeout=int(models.get("ollama_timeout", 600)),
-            ),
-            rewriting=RewritingConfig(
-                max_tokens=int(rewriting.get("max_tokens", 128)),
-                variants=tuple(
-                    RewriteVariantConfig(
-                        name=str(name),
-                        temperature=float(
-                            _section(rewrite_variants, str(name)).get(
-                                "temperature",
-                                0.0,
-                            )
-                        ),
-                    )
-                    for name in rewrite_variants
-                ),
-            ),
-            retrieval=RetrievalConfig(
-                dense_top_k=int(retrieval.get("dense_top_k", 50)),
-                dense_candidate_multiplier=int(
-                    retrieval.get("dense_candidate_multiplier", 10)
-                ),
-                dense_rescore_oversample=float(
-                    retrieval.get("dense_rescore_oversample", 2.0)
-                ),
-                sparse_top_k=int(retrieval.get("sparse_top_k", 50)),
-                elser_top_k=int(retrieval.get("elser_top_k", 20)),
-                rrf_top_k=int(retrieval.get("rrf_top_k", 20)),
-                rrf_rank_constant=int(retrieval.get("rrf_rank_constant", 60)),
-                prediction_top_k=int(retrieval.get("prediction_top_k", 10)),
-                request_batch_size=int(retrieval.get("request_batch_size", 64)),
-            ),
-            reranking=RerankingConfig(
-                input_top_k=int(reranking.get("input_top_k", 20)),
-                output_top_k=int(reranking.get("output_top_k", 10)),
-                task_batch_size=int(reranking.get("task_batch_size", 32)),
-                minimum_ndcg5_gain=float(
-                    reranking.get("minimum_ndcg5_gain", 0.01)
-                ),
-                minimum_improvement_probability=float(
-                    reranking.get("minimum_improvement_probability", 0.95)
-                ),
-                bootstrap_samples=int(reranking.get("bootstrap_samples", 5000)),
-                bootstrap_seed=int(reranking.get("bootstrap_seed", 42)),
-            ),
-            generation=GenerationConfig(
-                context_top_k=int(generation.get("context_top_k", 5)),
-                max_tokens=int(generation.get("max_tokens", 512)),
-                temperature=float(generation.get("temperature", 0.0)),
-                run_algorithmic_metrics=bool(
-                    generation.get("run_algorithmic_metrics", False)
-                ),
-                bertscore_model=str(
-                    generation.get(
-                        "bertscore_model",
-                        "microsoft/deberta-xlarge-mnli",
-                    )
-                ),
-                bertscore_batch_size=int(generation.get("bertscore_batch_size", 2)),
-            ),
-            thermal=ThermalConfig(
-                gpu_pause=float(thermal.get("gpu_pause", 80.0)),
-                gpu_resume=float(thermal.get("gpu_resume", 72.0)),
-                gpu_abort=float(thermal.get("gpu_abort", 86.0)),
-                cpu_pause=float(thermal.get("cpu_pause", 90.0)),
-                cpu_resume=float(thermal.get("cpu_resume", 80.0)),
-                cpu_abort=float(thermal.get("cpu_abort", 97.0)),
-                poll_interval=float(thermal.get("poll_interval", 5.0)),
-                resume_hold=float(thermal.get("resume_hold", 30.0)),
-            ),
+            run=RunConfig(**run),
+            services=ServiceConfig(**services),
+            models=ModelConfig(**models),
+            queries=queries,
+            pipelines=pipelines,
+            generators=generators,
+            generation_jobs=generation_jobs,
+            schedules=schedules,
+            retrieval=RetrievalConfig(**sections["retrieval"]),
+            reranking=RerankingConfig(**sections["reranking"]),
+            evaluation=EvaluationConfig(**sections["evaluation"]),
+            thermal=ThermalConfig(**sections["thermal"]),
         )
         config.validate()
         return config
@@ -277,72 +289,154 @@ class ExperimentConfig:
     def default_run_dir(self) -> Path:
         return self.run.output_root / self.run.name
 
+    def query(self, name: str) -> QueryConfig:
+        return self.queries[name]
+
+    def pipeline(self, name: str) -> PipelineConfig:
+        return self.pipelines[name]
+
+    def generator(self, name: str) -> GeneratorConfig:
+        return self.generators[name]
+
+    def generation_job(self, name: str) -> GenerationJobConfig:
+        return self.generation_jobs[name]
+
+    def schedule(self, name: str) -> ScheduleConfig:
+        return self.schedules[name]
+
+    def resolve_retrieval_output(self, reference: str) -> tuple[PipelineConfig, str]:
+        pipeline_name, output = reference.split(".", 1)
+        return self.pipelines[pipeline_name], output
+
     def validate(self) -> None:
-        positive = {
-            "run.cpu_slots": self.run.cpu_slots,
-            "models.bge_batch_size": self.models.bge_batch_size,
-            "models.bge_max_length": self.models.bge_max_length,
-            "models.reranker_batch_size": self.models.reranker_batch_size,
-            "models.reranker_max_length": self.models.reranker_max_length,
-            "models.ollama_num_ctx": self.models.ollama_num_ctx,
-            "models.ollama_timeout": self.models.ollama_timeout,
-            "rewriting.max_tokens": self.rewriting.max_tokens,
-            "retrieval.dense_top_k": self.retrieval.dense_top_k,
-            "retrieval.dense_candidate_multiplier": (
-                self.retrieval.dense_candidate_multiplier
+        errors: list[str] = []
+        retrieval, reranking = self.retrieval, self.reranking
+        constraints = (
+            (
+                bool(retrieval.bge_index_revision.strip()),
+                "retrieval.bge_index_revision must be a non-empty string",
             ),
-            "retrieval.sparse_top_k": self.retrieval.sparse_top_k,
-            "retrieval.elser_top_k": self.retrieval.elser_top_k,
-            "retrieval.rrf_top_k": self.retrieval.rrf_top_k,
-            "retrieval.rrf_rank_constant": self.retrieval.rrf_rank_constant,
-            "retrieval.prediction_top_k": self.retrieval.prediction_top_k,
-            "retrieval.request_batch_size": self.retrieval.request_batch_size,
-            "reranking.input_top_k": self.reranking.input_top_k,
-            "reranking.output_top_k": self.reranking.output_top_k,
-            "reranking.task_batch_size": self.reranking.task_batch_size,
-            "reranking.bootstrap_samples": self.reranking.bootstrap_samples,
-            "generation.context_top_k": self.generation.context_top_k,
-            "generation.max_tokens": self.generation.max_tokens,
-            "generation.bertscore_batch_size": self.generation.bertscore_batch_size,
-        }
-        invalid = [name for name, value in positive.items() if value <= 0]
-        if invalid:
-            raise ValueError(f"configuration values must be positive: {', '.join(invalid)}")
-        if self.retrieval.prediction_top_k > 10:
-            raise ValueError("retrieval.prediction_top_k cannot exceed the official limit 10")
-        if self.retrieval.dense_rescore_oversample < 1.0:
-            raise ValueError("dense_rescore_oversample must be at least 1.0")
-        if not 0.0 <= self.generation.temperature <= 2.0:
-            raise ValueError("generation.temperature must be between 0 and 2")
-        rewrite_names = [variant.name for variant in self.rewriting.variants]
-        if len(rewrite_names) != len(set(rewrite_names)):
-            raise ValueError("rewrite variant names must be unique")
-        invalid_names = [
-            name
-            for name in rewrite_names
-            if re.fullmatch(r"[a-z][a-z0-9_]*", name) is None
-        ]
-        if invalid_names:
-            raise ValueError("rewrite variant names must be safe identifiers")
-        missing_variants = {"qwen_t0", "qwen_t02"} - set(rewrite_names)
-        if missing_variants:
-            raise ValueError(
-                "missing required rewrite variants: "
-                + ", ".join(sorted(missing_variants))
-            )
-        invalid_temperatures = [
-            variant.name
-            for variant in self.rewriting.variants
-            if not 0.0 <= variant.temperature <= 2.0
-        ]
-        if invalid_temperatures:
-            raise ValueError(
-                "rewrite temperatures must be between 0 and 2: "
-                + ", ".join(invalid_temperatures)
-            )
-        if self.reranking.input_top_k > self.retrieval.rrf_top_k:
-            raise ValueError("reranking.input_top_k cannot exceed retrieval.rrf_top_k")
-        if self.reranking.output_top_k > self.reranking.input_top_k:
-            raise ValueError("reranking.output_top_k cannot exceed reranking.input_top_k")
-        if not 0.0 <= self.reranking.minimum_improvement_probability <= 1.0:
-            raise ValueError("minimum_improvement_probability must be between 0 and 1")
+            (
+                bool(retrieval.elser_index_revision.strip()),
+                "retrieval.elser_index_revision must be a non-empty string",
+            ),
+            (
+                1 <= retrieval.prediction_top_k <= 10,
+                "retrieval.prediction_top_k cannot exceed the official limit 10",
+            ),
+            (
+                retrieval.dense_rescore_oversample >= 1.0,
+                "dense_rescore_oversample must be at least 1.0",
+            ),
+            (
+                reranking.input_top_k <= retrieval.rrf_top_k,
+                "reranking.input_top_k cannot exceed retrieval.rrf_top_k",
+            ),
+            (
+                reranking.output_top_k <= reranking.input_top_k,
+                "reranking.output_top_k cannot exceed reranking.input_top_k",
+            ),
+            (
+                self.evaluation.bertscore_model == "microsoft/deberta-xlarge-mnli",
+                "the official IBM evaluator requires "
+                "evaluation.bertscore_model='microsoft/deberta-xlarge-mnli'",
+            ),
+            (
+                self.thermal.gpu_resume < self.thermal.gpu_pause
+                and self.thermal.cpu_resume < self.thermal.cpu_pause
+                and self.thermal.poll_interval > 0
+                and self.thermal.resume_hold >= 0,
+                "thermal thresholds must resume below pause and use non-negative timing",
+            ),
+        )
+        errors.extend(message for valid, message in constraints if not valid)
+
+        for section, items in {
+            "queries": self.queries,
+            "pipelines": self.pipelines,
+            "generators": self.generators,
+            "generation": self.generation_jobs,
+            "schedules": self.schedules,
+        }.items():
+            for name in items:
+                if _SAFE_NAME.fullmatch(name) is None:
+                    errors.append(f"{section}.{name} is not a safe identifier")
+
+        for query in self.queries.values():
+            label = f"queries.{query.name}"
+            if query.kind not in QUERY_KINDS:
+                errors.append(f"{label}.kind is unknown: {query.kind}")
+                continue
+            if query.kind in {"rewrite", "agentic"}:
+                if query.max_tokens is None or query.max_tokens <= 0:
+                    errors.append(f"{label}.max_tokens must be positive")
+                if query.temperature is None or not 0 <= query.temperature <= 2:
+                    errors.append(f"{label}.temperature must be between 0 and 2")
+                prompts = (
+                    (query.prompt, query.answer_prompt, query.compose_prompt)
+                    if query.kind == "agentic"
+                    else (query.prompt,)
+                )
+                for prompt in prompts:
+                    if prompt is None or not prompt.is_file():
+                        errors.append(f"prompt file is missing: {prompt}")
+
+        for pipeline in self.pipelines.values():
+            label = f"pipelines.{pipeline.name}"
+            if pipeline.kind not in PIPELINE_OUTPUTS:
+                errors.append(f"{label}.kind is unknown: {pipeline.kind}")
+            if pipeline.query not in self.queries:
+                errors.append(f"unknown query: {pipeline.query}")
+
+        for generator in self.generators.values():
+            label = f"generators.{generator.name}"
+            if not generator.prompt.is_file():
+                errors.append(f"prompt file is missing: {generator.prompt}")
+            if not 0 <= generator.temperature <= 2:
+                errors.append(f"{label}.temperature must be between 0 and 2")
+            if generator.max_tokens <= 0 or not 1 <= generator.context_top_k <= 10:
+                errors.append(
+                    f"{label}: max_tokens must be positive and context_top_k must be 1..10"
+                )
+
+        retrieval_references: list[str] = []
+        for job in self.generation_jobs.values():
+            label = f"generation.{job.name}"
+            if not isinstance(job.evaluate, bool):
+                errors.append(f"{label}.evaluate must be a boolean")
+            if job.task not in {"b", "c"}:
+                errors.append(f"{label}.task must be 'b' or 'c'")
+            if (job.task == "b") != (job.contexts == "reference"):
+                errors.append(
+                    f"{label}: Task B uses 'reference'; "
+                    "Task C uses a retrieval output"
+                )
+            if job.generator not in self.generators:
+                errors.append(f"unknown generator: {job.generator}")
+            if job.task == "c":
+                retrieval_references.append(job.contexts)
+
+        for schedule in self.schedules.values():
+            retrieval_references.extend(schedule.task_a)
+            for job_name in schedule.generation:
+                if job_name not in self.generation_jobs:
+                    errors.append(f"unknown generation job: {job_name}")
+
+        for reference in retrieval_references:
+            pipeline_name, separator, output = reference.partition(".")
+            if not separator or "." in output:
+                errors.append(
+                    f"retrieval output must be '<pipeline>.<output>': {reference!r}"
+                )
+                continue
+            pipeline = self.pipelines.get(pipeline_name)
+            if pipeline is None:
+                errors.append(f"unknown pipeline: {pipeline_name}")
+            elif output not in PIPELINE_OUTPUTS.get(pipeline.kind, ()):
+                errors.append(
+                    f"pipeline {pipeline.name!r} ({pipeline.kind}) has no output {output!r}"
+                )
+
+        errors = list(dict.fromkeys(errors))
+        if errors:
+            raise ValueError("invalid experiment config:\n- " + "\n- ".join(errors))

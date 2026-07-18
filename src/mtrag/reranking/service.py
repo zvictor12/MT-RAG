@@ -8,8 +8,6 @@ from mtrag.schemas import SearchHit
 def passage_text(hit: SearchHit) -> str:
     title = hit.title.strip() if hit.title else ""
     text = hit.text.strip() if hit.text else ""
-    if not title and not text:
-        raise ValueError(f"Candidate {hit.document_id} has no text")
     folded_title = title.casefold()
     folded_text = text.casefold()
     title_is_embedded = (
@@ -33,8 +31,6 @@ class RerankService:
         max_length: int = 512,
         score_chunk_size: int = 256,
     ) -> None:
-        if score_chunk_size <= 0:
-            raise ValueError("score_chunk_size must be positive")
         self.scorer = scorer
         self.cache = cache
         self.model_revision = model_revision

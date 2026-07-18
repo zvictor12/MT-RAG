@@ -4,9 +4,46 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
+.codex/
+/report.md
+/report.css
+/report.html
+/report.pdf
+/image.png
+/image-1.png
+/tests/
+
+# Local diagnostics and manual smoke-test helpers.
+scripts/check_services.py
+scripts/diagnose_env.py
+scripts/import_legacy_run.py
+scripts/smoke_*.py
+scripts/verify_experiment_cleanup.py
 
 # Elasticsearch repositories contain large runtime artifacts.
 artifacts/elasticsearch/archives/**
 artifacts/elasticsearch/snapshots/**
 !artifacts/elasticsearch/snapshots/**/
 !artifacts/elasticsearch/snapshots/**/.gitkeep
+
+# Publish only the canonical main campaign. Runtime state, caches, logs,
+# invalid outputs and legacy duplicate trees stay local.
+/runs/*
+!/runs/main/
+/runs/main/*
+!/runs/main/experiment.toml
+!/runs/main/manifest.json
+!/runs/main/plans/
+!/runs/main/plans/**
+!/runs/main/rewrites/
+!/runs/main/rewrites/**
+!/runs/main/features/
+!/runs/main/features/**
+!/runs/main/experiments/
+!/runs/main/experiments/**
+!/runs/main/generation/
+!/runs/main/generation/**
+/runs/main/rewrites/qwen.jsonl
+/runs/main/features/bge/dense.npz
+/runs/main/features/bge/sparse.jsonl
+/runs/main/generation/task_c_bge_last/

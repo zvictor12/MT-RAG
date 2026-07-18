@@ -1,13 +1,58 @@
 {
   "version": 1,
   "created_at": "2026-07-17T00:19:44.870127+00:00",
-  "updated_at": "2026-07-17T07:51:50.466181+00:00",
+  "updated_at": "2026-07-18T11:14:26.988265+00:00",
   "stages": {
     "decide_reranker": {
       "status": "succeeded",
       "attempts": 1,
       "started_at": "2026-07-17T01:23:28.979866+00:00",
       "finished_at": "2026-07-17T01:23:30.200880+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "encode.bge.gold.e2cfda911600": {
+      "status": "succeeded",
+      "attempts": 2,
+      "started_at": "2026-07-17T13:57:52.686328+00:00",
+      "finished_at": "2026-07-17T13:57:52.903846+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "encode.bge.last.6b79d9672f07": {
+      "status": "succeeded",
+      "attempts": 2,
+      "started_at": "2026-07-17T13:57:52.933515+00:00",
+      "finished_at": "2026-07-17T13:57:53.164427+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "encode.bge.qwen_t0.df9564cb11fd": {
+      "status": "succeeded",
+      "attempts": 2,
+      "started_at": "2026-07-17T13:57:53.654024+00:00",
+      "finished_at": "2026-07-17T13:57:53.871227+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "encode.bge.qwen_t02.bdf2d4a0a0cd": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-17T14:19:36.111883+00:00",
+      "finished_at": "2026-07-17T14:21:35.831500+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "encode.bge.qwen_v2_t0.ddb0ab94ffb9": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-18T02:28:10.079580+00:00",
+      "finished_at": "2026-07-18T02:28:58.419724+00:00",
       "return_code": 0,
       "pid": null,
       "error": null
@@ -39,6 +84,42 @@
       "pid": null,
       "error": null
     },
+    "evaluate_generation_batch.final_controls.7337e3431c3c": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-18T10:50:37.036256+00:00",
+      "finished_at": "2026-07-18T11:14:26.988239+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "evaluate_generation_batch.overnight_2.26b5ab16ad04": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-17T16:06:55.969458+00:00",
+      "finished_at": "2026-07-17T17:41:25.165285+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "evaluate_generation_batch.task_c_elser_agentic_reranked.39ffec3afdb2": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-18T09:15:30.746115+00:00",
+      "finished_at": "2026-07-18T09:42:35.191905+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "evaluate_generation_batch.task_c_elser_last_reranked.64762402aa13": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-18T04:06:53.625499+00:00",
+      "finished_at": "2026-07-18T04:33:28.093443+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
     "evaluate_generation_bge": {
       "status": "succeeded",
       "attempts": 2,
@@ -48,11 +129,227 @@
       "pid": null,
       "error": null
     },
+    "evaluate_task_a.bge_gold.dense.300b3a759b21": {
+      "status": "succeeded",
+      "attempts": 2,
+      "started_at": "2026-07-17T13:57:53.147775+00:00",
+      "finished_at": "2026-07-17T13:57:53.367311+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "evaluate_task_a.bge_last.dense.0f4e6c571248": {
+      "status": "succeeded",
+      "attempts": 2,
+      "started_at": "2026-07-17T13:57:53.419922+00:00",
+      "finished_at": "2026-07-17T13:57:53.637420+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "evaluate_task_a.bge_t0.dense.c95f84ea3eca": {
+      "status": "succeeded",
+      "attempts": 2,
+      "started_at": "2026-07-17T13:57:54.119119+00:00",
+      "finished_at": "2026-07-17T13:57:54.338586+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "evaluate_task_a.bge_t0.rrf.3aa2b514c686": {
+      "status": "succeeded",
+      "attempts": 2,
+      "started_at": "2026-07-17T13:57:54.842632+00:00",
+      "finished_at": "2026-07-17T13:57:55.062271+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "evaluate_task_a.bge_t0.rrf_reranked.9c95f703138f": {
+      "status": "succeeded",
+      "attempts": 2,
+      "started_at": "2026-07-17T14:19:36.092639+00:00",
+      "finished_at": "2026-07-17T14:19:36.313125+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "evaluate_task_a.bge_t0.sparse.343c221c9379": {
+      "status": "succeeded",
+      "attempts": 2,
+      "started_at": "2026-07-17T13:57:54.587489+00:00",
+      "finished_at": "2026-07-17T13:57:54.816708+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "evaluate_task_a.bge_t02.dense.eb912923b687": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-17T14:22:16.552538+00:00",
+      "finished_at": "2026-07-17T14:22:17.477072+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "evaluate_task_a.bge_t02.rrf.c27495476a5f": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-17T14:22:22.583347+00:00",
+      "finished_at": "2026-07-17T14:22:23.210969+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "evaluate_task_a.bge_v2_t0.dense.6b217171984d": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-18T02:29:03.792105+00:00",
+      "finished_at": "2026-07-18T02:29:04.616863+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "evaluate_task_a.elser_agentic.base.5bcc80fead5e": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-18T10:23:56.569078+00:00",
+      "finished_at": "2026-07-18T10:23:57.391844+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "evaluate_task_a.elser_agentic.reranked.021acd5a0fc6": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-18T08:04:18.944583+00:00",
+      "finished_at": "2026-07-18T08:04:19.568796+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "evaluate_task_a.elser_last.base.b16c1e13a810": {
+      "status": "succeeded",
+      "attempts": 3,
+      "started_at": "2026-07-18T02:43:39.627686+00:00",
+      "finished_at": "2026-07-18T02:43:39.847423+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "evaluate_task_a.elser_last.reranked.da41122faab1": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-18T02:54:36.910165+00:00",
+      "finished_at": "2026-07-18T02:54:37.639648+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "evaluate_task_a.elser_t0.base.bd2d55c18b8a": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-18T02:44:05.597544+00:00",
+      "finished_at": "2026-07-18T02:44:06.219768+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "evaluate_task_a.elser_t02.base.c1954bfa7da8": {
+      "status": "pending",
+      "attempts": 0,
+      "started_at": null,
+      "finished_at": null,
+      "return_code": null,
+      "pid": null,
+      "error": null
+    },
+    "evaluate_task_a.elser_v2_t0.base.5cf1f9ba0a2e": {
+      "status": "pending",
+      "attempts": 0,
+      "started_at": null,
+      "finished_at": null,
+      "return_code": null,
+      "pid": null,
+      "error": null
+    },
+    "fuse.bge_t0.rrf.535a419b4e6f": {
+      "status": "succeeded",
+      "attempts": 2,
+      "started_at": "2026-07-17T13:57:54.596995+00:00",
+      "finished_at": "2026-07-17T13:57:54.831423+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "fuse.bge_t02.rrf.33fc1c6c9527": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-17T14:22:21.338473+00:00",
+      "finished_at": "2026-07-17T14:22:22.565490+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
     "fuse_bge": {
       "status": "succeeded",
       "attempts": 1,
       "started_at": "2026-07-17T01:07:23.610393+00:00",
       "finished_at": "2026-07-17T01:07:24.733661+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "generate.task_b.f975c5fa7ddf": {
+      "status": "succeeded",
+      "attempts": 2,
+      "started_at": "2026-07-17T14:21:35.871409+00:00",
+      "finished_at": "2026-07-17T14:21:36.192326+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "generate.task_c_bge_last.54f7dbe2b738": {
+      "status": "succeeded",
+      "attempts": 2,
+      "started_at": "2026-07-17T14:21:36.595107+00:00",
+      "finished_at": "2026-07-17T16:06:55.475327+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "generate.task_c_bge_t0_legacy.a0fe05a32a66": {
+      "status": "succeeded",
+      "attempts": 2,
+      "started_at": "2026-07-17T14:21:36.232503+00:00",
+      "finished_at": "2026-07-17T14:21:36.554070+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "generate.task_c_elser_agentic_reranked.b693498b3243": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-18T08:04:18.965672+00:00",
+      "finished_at": "2026-07-18T09:15:30.447942+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "generate.task_c_elser_last_reranked.9af1a5ced03b": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-18T10:23:56.616366+00:00",
+      "finished_at": "2026-07-18T10:50:36.703056+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "generate.task_c_elser_last_reranked.d7b77b733db2": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-18T02:54:36.932816+00:00",
+      "finished_at": "2026-07-18T04:06:53.227863+00:00",
       "return_code": 0,
       "pid": null,
       "error": null
@@ -84,6 +381,42 @@
       "pid": null,
       "error": null
     },
+    "rerank.bge_t0.rrf_reranked.3de3775c91e4": {
+      "status": "succeeded",
+      "attempts": 2,
+      "started_at": "2026-07-17T14:19:35.742507+00:00",
+      "finished_at": "2026-07-17T14:19:36.072937+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "rerank.elser_agentic.reranked.718c69b92652": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-18T08:01:01.698778+00:00",
+      "finished_at": "2026-07-18T08:04:18.929192+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "rerank.elser_last.reranked.0575b502d40b": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-18T02:51:03.576360+00:00",
+      "finished_at": "2026-07-18T02:54:36.887723+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "rerank.elser_last_all.reranked.c236fa2c86e7": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-18T10:23:56.353301+00:00",
+      "finished_at": "2026-07-18T10:23:56.587834+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
     "rerank_bge": {
       "status": "succeeded",
       "attempts": 2,
@@ -93,11 +426,164 @@
       "pid": null,
       "error": null
     },
+    "retrieve.bge_gold.dense.d9a6f3ac8ebd": {
+      "status": "succeeded",
+      "attempts": 2,
+      "started_at": "2026-07-17T13:57:52.916740+00:00",
+      "finished_at": "2026-07-17T13:57:53.134380+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "retrieve.bge_last.dense.5d44a8c992c9": {
+      "status": "succeeded",
+      "attempts": 2,
+      "started_at": "2026-07-17T13:57:53.175535+00:00",
+      "finished_at": "2026-07-17T13:57:53.393937+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "retrieve.bge_t0.dense.8ef76d5ca73c": {
+      "status": "succeeded",
+      "attempts": 2,
+      "started_at": "2026-07-17T13:57:53.884864+00:00",
+      "finished_at": "2026-07-17T13:57:54.103778+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "retrieve.bge_t0.sparse.7396755ce734": {
+      "status": "succeeded",
+      "attempts": 2,
+      "started_at": "2026-07-17T13:57:54.352780+00:00",
+      "finished_at": "2026-07-17T13:57:54.572943+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "retrieve.bge_t02.dense.39cfbd05e656": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-17T14:21:35.850926+00:00",
+      "finished_at": "2026-07-17T14:22:16.533937+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "retrieve.bge_t02.sparse.0e0dd48e2234": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-17T14:22:17.488397+00:00",
+      "finished_at": "2026-07-17T14:22:21.321414+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "retrieve.bge_v2_t0.dense.8b1006141959": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-18T02:28:58.441719+00:00",
+      "finished_at": "2026-07-18T02:29:03.777889+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "retrieve.elser_agentic.base.feb6768c22af": {
+      "status": "succeeded",
+      "attempts": 2,
+      "started_at": "2026-07-18T10:23:56.331223+00:00",
+      "finished_at": "2026-07-18T10:23:56.555202+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "retrieve.elser_last.base.923d6476f548": {
+      "status": "succeeded",
+      "attempts": 4,
+      "started_at": "2026-07-18T02:51:03.318273+00:00",
+      "finished_at": "2026-07-18T02:51:03.541364+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "retrieve.elser_last_all.base.f926a43c422f": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-18T10:23:56.061988+00:00",
+      "finished_at": "2026-07-18T10:23:56.283852+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "retrieve.elser_t0.base.f03fc3b57ab2": {
+      "status": "succeeded",
+      "attempts": 3,
+      "started_at": "2026-07-18T02:43:41.197598+00:00",
+      "finished_at": "2026-07-18T02:44:05.580800+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "retrieve.elser_t02.base.50028a56110f": {
+      "status": "pending",
+      "attempts": 0,
+      "started_at": null,
+      "finished_at": null,
+      "return_code": null,
+      "pid": null,
+      "error": null
+    },
+    "retrieve.elser_v2_t0.base.b8415513668b": {
+      "status": "pending",
+      "attempts": 0,
+      "started_at": null,
+      "finished_at": null,
+      "return_code": null,
+      "pid": null,
+      "error": null
+    },
     "retrieve_bge": {
       "status": "succeeded",
       "attempts": 1,
       "started_at": "2026-07-17T01:07:09.835334+00:00",
       "finished_at": "2026-07-17T01:07:23.594883+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "rewrite.agentic_t0.c8a686b48f3a": {
+      "status": "succeeded",
+      "attempts": 6,
+      "started_at": "2026-07-18T10:23:56.082595+00:00",
+      "finished_at": "2026-07-18T10:23:56.303251+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "rewrite.qwen_t0.8d3ed2002333": {
+      "status": "succeeded",
+      "attempts": 4,
+      "started_at": "2026-07-18T02:43:40.950206+00:00",
+      "finished_at": "2026-07-18T02:43:41.173096+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "rewrite.qwen_t02.76e3abd1d8c3": {
+      "status": "pending",
+      "attempts": 2,
+      "started_at": "2026-07-17T13:57:53.902800+00:00",
+      "finished_at": null,
+      "return_code": null,
+      "pid": null,
+      "error": null
+    },
+    "rewrite.qwen_v2_t0.97a42bdf4b76": {
+      "status": "succeeded",
+      "attempts": 3,
+      "started_at": "2026-07-18T01:59:12.598879+00:00",
+      "finished_at": "2026-07-18T02:28:10.037362+00:00",
       "return_code": 0,
       "pid": null,
       "error": null
@@ -116,6 +602,42 @@
       "attempts": 1,
       "started_at": "2026-07-17T01:23:30.211743+00:00",
       "finished_at": "2026-07-17T01:23:31.132563+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "unload_ollama.final_controls.87a0cd871cc6": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-18T10:50:36.787291+00:00",
+      "finished_at": "2026-07-18T10:50:37.008784+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "unload_ollama.overnight_2.2166e05fab6c": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-17T16:06:55.514823+00:00",
+      "finished_at": "2026-07-17T16:06:55.939672+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "unload_ollama.task_c_elser_agentic_reranked.46c0ccbb4c87": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-18T09:15:30.496489+00:00",
+      "finished_at": "2026-07-18T09:15:30.720487+00:00",
+      "return_code": 0,
+      "pid": null,
+      "error": null
+    },
+    "unload_ollama.task_c_elser_last_reranked.a8864249dce0": {
+      "status": "succeeded",
+      "attempts": 1,
+      "started_at": "2026-07-18T04:06:53.277067+00:00",
+      "finished_at": "2026-07-18T04:06:53.600413+00:00",
       "return_code": 0,
       "pid": null,
       "error": null

@@ -17,18 +17,10 @@ TemperatureReader = Callable[[], float | None]
 class ThermalThresholds:
     pause: float
     resume: float
-    # Kept for compatibility with an active run config; no abort is performed.
-    abort: float
 
     def __post_init__(self) -> None:
         if not self.resume < self.pause:
             raise ValueError("thermal thresholds must satisfy resume < pause")
-
-
-@dataclass(frozen=True)
-class ThermalSample:
-    gpu_celsius: float | None
-    cpu_celsius: float | None
 
 
 def read_nvidia_temperature() -> float | None:
@@ -138,8 +130,8 @@ class ThermalGuard:
     def __init__(
         self,
         *,
-        gpu: ThermalThresholds = ThermalThresholds(80.0, 72.0, 86.0),
-        cpu: ThermalThresholds = ThermalThresholds(90.0, 80.0, 97.0),
+        gpu: ThermalThresholds = ThermalThresholds(80.0, 72.0),
+        cpu: ThermalThresholds = ThermalThresholds(90.0, 80.0),
         poll_interval: float = 5.0,
         resume_hold: float = 30.0,
         hot_samples: int = 1,
@@ -148,12 +140,6 @@ class ThermalGuard:
         sleeper: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        if poll_interval <= 0:
-            raise ValueError("poll_interval must be positive")
-        if resume_hold < 0:
-            raise ValueError("resume_hold cannot be negative")
-        if hot_samples < 1:
-            raise ValueError("hot_samples must be at least one")
         self.thresholds = {"gpu": gpu, "cpu": cpu}
         self.readers = {"gpu": gpu_reader, "cpu": cpu_reader}
         self.poll_interval = poll_interval
@@ -163,12 +149,6 @@ class ThermalGuard:
         self._clock = clock
         self._warned_missing: set[str] = set()
 
-    def sample(self) -> ThermalSample:
-        return ThermalSample(
-            gpu_celsius=self.readers["gpu"](),
-            cpu_celsius=self.readers["cpu"](),
-        )
-
     def wait(self, resource: str = "gpu") -> None:
         """Block at a batch boundary while monitored hardware is too hot.
 
@@ -176,8 +156,6 @@ class ThermalGuard:
         keep it busy. CPU-only work does not require a working NVIDIA sensor.
         """
 
-        if resource not in {"gpu", "cpu", "all"}:
-            raise ValueError("resource must be 'gpu', 'cpu', or 'all'")
         monitored = ("cpu",) if resource == "cpu" else ("gpu", "cpu")
         hot_counts = {name: 0 for name in monitored}
         paused = False

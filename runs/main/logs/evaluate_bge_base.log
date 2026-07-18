@@ -1,7 +1,0 @@
-
-[2026-07-17T01:07:24.760645+00:00] $ /home/victor/dev/GitHub/mt-rag/.venv/bin/python3 /home/victor/dev/GitHub/mt-rag/scripts/run_experiment.py stage evaluate_bge_base --config /home/victor/dev/GitHub/mt-rag/configs/experiment.toml --run-dir /home/victor/dev/GitHub/mt-rag/runs/main
-bge_dense_last: nDCG@5=0.3460, Recall@5=0.3752
-bge_dense_qwen: nDCG@5=0.3462, Recall@5=0.3876
-bge_dense_gold: nDCG@5=0.3750, Recall@5=0.4119
-bge_sparse_qwen: nDCG@5=0.2551, Recall@5=0.2806
-bge_rrf_qwen: nDCG@5=0.3049, Recall@5=0.3380

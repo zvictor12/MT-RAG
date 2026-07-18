@@ -1,170 +1,140 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 from mtrag.data import BenchmarkRepository
 from mtrag.encoding import BGEM3QueryEncoder, BgeFeatureStore
-from mtrag.experiments.artifacts import (
-    JsonlCheckpoint,
-    RunArtifacts,
-    read_jsonl,
-    write_jsonl_atomic,
+from mtrag.experiments.artifacts import JsonlCheckpoint, RunArtifacts
+from mtrag.experiments.common import (
+    ollama_client,
+    ollama_model_info,
+    progress,
+    thermal_guard,
 )
-from mtrag.experiments.common import ollama_client, progress, thermal_guard
 from mtrag.experiments.spec import ExperimentConfig
-from mtrag.llm import QueryRewriter
-from mtrag.llm.prompts import REWRITE_PROMPT_VERSION
+from mtrag.llm import HistoryQueryAgent, QueryRewriter
+from mtrag.llm.prompts import PromptTemplate
 from mtrag.runtime import SqliteCache, stable_key
-from mtrag.schemas import BenchmarkTask, BgeFeatures, QueryCase, QueryVariant
+from mtrag.schemas import ArtifactRef, BgeFeatures, QueryCase, QueryVariant
 
 
 SINGLE_TURN_REWRITE_VERSION = "single-turn-identity-v1"
-QWEN_T0 = "qwen_t0"
-QWEN_T02 = "qwen_t02"
+BGE_QUERY_CACHE_VERSION = "flagembedding-bge-m3-v1"
 
 
-def _final_user_question(task: BenchmarkTask) -> str:
-    for message in reversed(task.messages):
-        if message.speaker == "user":
-            return message.text
-    raise ValueError(f"task {task.task_id} has no user message")
+def load_query_cases(
+    repository: BenchmarkRepository,
+    config: ExperimentConfig,
+    artifacts: RunArtifacts,
+    query: ArtifactRef,
+) -> tuple[QueryCase, ...]:
+    query_config = config.query(query.name)
+    if query_config.kind == "last_turn_all":
+        return repository.all_task_last_query_cases()
+    variant = {
+        "last_turn": QueryVariant.LAST,
+        "gold": QueryVariant.GOLD,
+    }.get(query_config.kind)
+    if variant is not None:
+        return repository.query_cases(variant)
+    return repository.query_cases(
+        QueryVariant.QWEN,
+        qwen_queries=artifacts.rewrite(query),
+    )
 
 
-def _single_turn_record(
-    task: BenchmarkTask,
-    *,
-    variant: str = QWEN_T0,
-    temperature: float = 0.0,
-) -> dict:
-    return {
-        "task_id": task.task_id,
-        "query": _final_user_question(task),
-        "rewrite_method": "identity",
-        "rewrite_version": SINGLE_TURN_REWRITE_VERSION,
-        "rewrite_variant": variant,
-        "temperature": temperature,
-    }
-
-
-def _prepare_rewrite_checkpoint(
-    path: Path,
-    tasks: tuple[BenchmarkTask, ...],
-    *,
-    variant: str,
-    temperature: float,
-) -> JsonlCheckpoint:
-    checkpoint = JsonlCheckpoint(path)
-    tasks_by_id = {task.task_id: task for task in tasks}
-    records = []
-    changed = False
-
-    for task_id, record in checkpoint.records.items():
-        task = tasks_by_id.get(task_id)
-        if task is not None and task.turn == 1:
-            identity = _single_turn_record(
-                task,
-                variant=variant,
-                temperature=temperature,
-            )
-            records.append(identity)
-            changed = changed or record != identity
-        else:
-            recorded_variant = record.get("rewrite_variant")
-            recorded_temperature = record.get("temperature")
-            if recorded_variant not in {None, variant}:
-                raise ValueError(
-                    f"rewrite variant mismatch in {path}: "
-                    f"{recorded_variant!r} != {variant!r}"
-                )
-            if (
-                recorded_temperature is not None
-                and float(recorded_temperature) != temperature
-            ):
-                raise ValueError(
-                    f"rewrite temperature mismatch in {path}: "
-                    f"{recorded_temperature!r} != {temperature!r}"
-                )
-            normalized = dict(record)
-            normalized["rewrite_method"] = "qwen"
-            normalized["rewrite_version"] = normalized.pop(
-                "prompt_version",
-                REWRITE_PROMPT_VERSION,
-            )
-            normalized["rewrite_variant"] = variant
-            normalized["temperature"] = temperature
-            records.append(normalized)
-            changed = changed or record != normalized
-
-    if not changed:
-        return checkpoint
-
-    write_jsonl_atomic(path, records)
-    print("normalized rewrites and restored original turn-1 text", flush=True)
-    return JsonlCheckpoint(path)
-
-
-def _temperature(config: ExperimentConfig, name: str, default: float) -> float:
-    variants = getattr(config.rewriting, "variants", ())
-    for variant in variants:
-        if variant.name == name:
-            return float(variant.temperature)
-    return default
-
-
-def _rewrite_variant(
+def rewrite_query(
     config: ExperimentConfig,
     artifacts: RunArtifacts,
     *,
-    variant: str,
-    temperature: float,
-    output: Path,
+    query: ArtifactRef,
 ) -> None:
-    repository = BenchmarkRepository(config.run.benchmark_root)
-    tasks = repository.load_tasks()
-    checkpoint = _prepare_rewrite_checkpoint(
-        output,
-        tasks,
-        variant=variant,
-        temperature=temperature,
-    )
+    query_config = config.query(query.name)
+    tasks = BenchmarkRepository(config.run.benchmark_root).load_tasks()
+    checkpoint = JsonlCheckpoint(artifacts.rewrite(query))
     pending = [task for task in tasks if task.task_id not in checkpoint.completed]
+    if not pending:
+        return
+
     client = ollama_client(config)
+    prompt = PromptTemplate.from_file(query_config.prompt)
+    model = ollama_model_info(config)
+    provenance = {
+        "rewrite_variant": query.name,
+        "temperature": query_config.temperature,
+        **model.provenance,
+    }
 
     with SqliteCache(artifacts.cache) as cache:
-        rewriter = QueryRewriter(
-            client,
-            model_name=(
-                f"{config.models.ollama_model}@{config.models.ollama_digest}"
-            ),
-            cache=cache,
-            guard=thermal_guard(config),
-            max_tokens=config.rewriting.max_tokens,
-            temperature=temperature,
-        )
+        guard = thermal_guard(config)
+        if query_config.kind == "agentic":
+            answer_prompt = PromptTemplate.from_file(query_config.answer_prompt)
+            compose_prompt = PromptTemplate.from_file(query_config.compose_prompt)
+            rewriter = HistoryQueryAgent(
+                client,
+                model_name=model.identity,
+                question_prompt=prompt,
+                answer_prompt=answer_prompt,
+                composition_prompt=compose_prompt,
+                cache=cache,
+                guard=guard,
+                max_tokens=query_config.max_tokens,
+                temperature=query_config.temperature,
+            )
+            prompt_revision = ":".join(
+                (prompt.sha256, answer_prompt.sha256, compose_prompt.sha256)
+            )
+        else:
+            rewriter = QueryRewriter(
+                client,
+                model_name=model.identity,
+                prompt=prompt,
+                cache=cache,
+                guard=guard,
+                max_tokens=query_config.max_tokens,
+                temperature=query_config.temperature,
+            )
+            prompt_revision = prompt.sha256
+
         try:
             for index, task in enumerate(pending, start=1):
+                details = {}
                 if task.turn == 1:
-                    record = _single_turn_record(
-                        task,
-                        variant=variant,
-                        temperature=temperature,
-                    )
-                else:
-                    record = {
-                        "task_id": task.task_id,
-                        "query": rewriter.rewrite(task),
-                        "rewrite_method": "qwen",
-                        "rewrite_variant": variant,
-                        "temperature": temperature,
-                        "model": config.models.ollama_model,
-                        "model_digest": config.models.ollama_digest,
-                        "max_tokens": config.rewriting.max_tokens,
-                        "rewrite_version": REWRITE_PROMPT_VERSION,
+                    rewritten = task.final_question
+                    method = "identity"
+                    revision = SINGLE_TURN_REWRITE_VERSION
+                elif query_config.kind == "agentic":
+                    outcome = rewriter.rewrite(task)
+                    rewritten = outcome.query
+                    method = "history_agent"
+                    revision = prompt_revision
+                    details = {
+                        "resolution": outcome.resolution,
+                        "clarification_questions": outcome.questions,
+                        "resolution_status": outcome.status,
+                        "evidence_ids": outcome.evidence_ids,
                     }
-                checkpoint.append(record)
+                    if outcome.composition is not None:
+                        details["composition"] = outcome.composition
+                else:
+                    rewritten = rewriter.rewrite(task)
+                    method = "qwen"
+                    revision = prompt_revision
+
+                checkpoint.append(
+                    {
+                        "task_id": task.task_id,
+                        "query": rewritten,
+                        "rewrite_method": method,
+                        "rewrite_version": revision,
+                        **details,
+                        **provenance,
+                    }
+                )
                 if index % 10 == 0 or index == len(pending):
                     progress(
-                        f"rewrite {variant}",
+                        f"rewrite {query.name}",
                         len(tasks) - len(pending) + index,
                         len(tasks),
                     )
@@ -172,178 +142,70 @@ def _rewrite_variant(
             client.unload()
 
 
-def rewrite_qwen(config: ExperimentConfig, artifacts: RunArtifacts) -> None:
-    _rewrite_variant(
-        config,
-        artifacts,
-        variant=QWEN_T0,
-        temperature=_temperature(config, QWEN_T0, 0.0),
-        output=artifacts.qwen_queries,
-    )
-
-
-def _migrate_qwen_t0(config: ExperimentConfig, artifacts: RunArtifacts) -> None:
-    destination = artifacts.rewrite_queries(QWEN_T0)
-    if destination.exists():
-        return
-    records = read_jsonl(artifacts.qwen_queries)
-    tasks = BenchmarkRepository(config.run.benchmark_root).load_tasks()
-    tasks_by_id = {task.task_id: task for task in tasks}
-    temperature = _temperature(config, QWEN_T0, 0.0)
-    normalized = []
-    for record in records:
-        task = tasks_by_id[record["task_id"]]
-        if task.turn == 1:
-            normalized.append(
-                _single_turn_record(
-                    task,
-                    variant=QWEN_T0,
-                    temperature=temperature,
-                )
-            )
-        else:
-            item = dict(record)
-            item["rewrite_method"] = "qwen"
-            item["rewrite_variant"] = QWEN_T0
-            item["temperature"] = temperature
-            item["max_tokens"] = config.rewriting.max_tokens
-            item["rewrite_version"] = item.pop(
-                "prompt_version",
-                item.get("rewrite_version", REWRITE_PROMPT_VERSION),
-            )
-            normalized.append(item)
-    write_jsonl_atomic(destination, normalized)
-    print(f"migrated legacy rewrites to {destination}", flush=True)
-
-
-def rewrite_qwen_t02(config: ExperimentConfig, artifacts: RunArtifacts) -> None:
-    _migrate_qwen_t0(config, artifacts)
-    temperature = _temperature(config, QWEN_T02, 0.2)
-    _rewrite_variant(
-        config,
-        artifacts,
-        variant=QWEN_T02,
-        temperature=temperature,
-        output=artifacts.rewrite_queries(QWEN_T02),
-    )
-
-
-def feature_key(case: QueryCase) -> str:
-    return f"{case.variant.value}:{case.task_id}"
-
-
-def load_query_cases(
-    repository: BenchmarkRepository,
-    qwen_path: Path,
-) -> list[QueryCase]:
-    cases: list[QueryCase] = []
-    cases.extend(repository.query_cases(QueryVariant.LAST))
-    cases.extend(
-        repository.query_cases(QueryVariant.QWEN, qwen_queries=qwen_path)
-    )
-    cases.extend(repository.query_cases(QueryVariant.GOLD))
-    return cases
-
-
-def encode_bge(config: ExperimentConfig, artifacts: RunArtifacts) -> None:
-    repository = BenchmarkRepository(config.run.benchmark_root)
-    cases = load_query_cases(repository, artifacts.qwen_queries)
-    _encode_cases(config, artifacts, cases, merge=False)
-
-
-def encode_bge_variants(
+def encode_bge_query(
     config: ExperimentConfig,
     artifacts: RunArtifacts,
-) -> None:
-    repository = BenchmarkRepository(config.run.benchmark_root)
-    cases = repository.query_cases(
-        QueryVariant.QWEN_T02,
-        qwen_queries=artifacts.rewrite_queries(QWEN_T02),
-    )
-    _encode_cases(config, artifacts, cases, merge=True)
-
-
-def _encode_cases(
-    config: ExperimentConfig,
-    artifacts: RunArtifacts,
-    cases: list[QueryCase] | tuple[QueryCase, ...],
     *,
-    merge: bool,
+    query: ArtifactRef,
+    features: ArtifactRef,
 ) -> None:
+    repository = BenchmarkRepository(config.run.benchmark_root)
+    cases = load_query_cases(repository, config, artifacts, query)
+    encoded = _encode_query_cases(config, cases, artifacts.cache)
+    BgeFeatureStore(artifacts.bge_features(features)).save(encoded)
+    print(f"saved {len(encoded)} BGE query feature sets", flush=True)
+
+
+def _encode_query_cases(
+    config: ExperimentConfig,
+    cases: Sequence[QueryCase],
+    cache_path: Path,
+) -> dict[str, BgeFeatures]:
+    texts = tuple(dict.fromkeys(case.text for case in cases))
     namespace = "bge_query"
-
-    by_text: dict[str, list[QueryCase]] = {}
-    for case in cases:
-        by_text.setdefault(case.text, []).append(case)
-
-    with SqliteCache(artifacts.cache) as cache:
-        missing: list[tuple[str, str]] = []
-        for text in by_text:
-            key = stable_key(
+    with SqliteCache(cache_path) as cache:
+        keys = {
+            text: stable_key(
+                BGE_QUERY_CACHE_VERSION,
                 config.models.bge_revision,
                 config.models.bge_max_length,
                 text,
             )
-            if cache.get(namespace, key) is None:
-                missing.append((key, text))
+            for text in texts
+        }
+        cached = {text: cache.get(namespace, key) for text, key in keys.items()}
+        features = {
+            text: BgeFeatures(tuple(value["dense"]), value["sparse"])
+            for text, value in cached.items()
+            if value is not None
+        }
+        missing = [text for text, value in cached.items() if value is None]
 
         if missing:
-            encoder = BGEM3QueryEncoder(
+            with BGEM3QueryEncoder(
                 config.models.bge_path,
                 batch_size=config.models.bge_batch_size,
                 max_length=config.models.bge_max_length,
                 guard=thermal_guard(config),
-            )
-            try:
-                checkpoint_size = max(256, config.models.bge_batch_size * 8)
-                for start in range(0, len(missing), checkpoint_size):
-                    batch = missing[start : start + checkpoint_size]
-                    encoded = encoder.encode([text for _key, text in batch])
+            ) as encoder:
+                step = max(256, config.models.bge_batch_size * 8)
+                for start in range(0, len(missing), step):
+                    batch = missing[start : start + step]
+                    encoded = dict(zip(batch, encoder.encode(batch), strict=True))
+                    features.update(encoded)
                     cache.put_many(
                         namespace,
                         {
-                            key: {
-                                "dense": list(features.dense),
-                                "sparse": features.sparse,
+                            keys[text]: {
+                                "dense": value.dense,
+                                "sparse": value.sparse,
                             }
-                            for (key, _text), features in zip(
-                                batch,
-                                encoded,
-                                strict=True,
-                            )
+                            for text, value in encoded.items()
                         },
                     )
                     progress(
-                        "bge encode variants" if merge else "bge encode",
+                        "bge encode",
                         min(start + len(batch), len(missing)),
                         len(missing),
                     )
-            finally:
-                encoder.close()
-
-        features_by_case = (
-            BgeFeatureStore(artifacts.bge_features).load() if merge else {}
-        )
-        for text, text_cases in by_text.items():
-            key = stable_key(
-                config.models.bge_revision,
-                config.models.bge_max_length,
-                text,
-            )
-            value = cache.get(namespace, key)
-            if value is None:
-                raise RuntimeError(
-                    f"missing cached BGE feature for {text_cases[0].task_id}"
-                )
-            features = BgeFeatures(
-                dense=tuple(float(number) for number in value["dense"]),
-                sparse={
-                    str(token): float(weight)
-                    for token, weight in value["sparse"].items()
-                },
-            )
-            for case in text_cases:
-                features_by_case[feature_key(case)] = features
-
-    BgeFeatureStore(artifacts.bge_features).save(features_by_case)
-    print(f"saved {len(features_by_case)} query feature sets", flush=True)
+    return {case.task_id: features[case.text] for case in cases}

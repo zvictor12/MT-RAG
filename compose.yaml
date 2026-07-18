@@ -8,6 +8,9 @@ services:
       - xpack.ml.enabled=true
       - xpack.ml.max_machine_memory_percent=40
       - path.repo=/snapshots
+      - cluster.routing.allocation.disk.watermark.low=10gb
+      - cluster.routing.allocation.disk.watermark.high=5gb
+      - cluster.routing.allocation.disk.watermark.flood_stage=2gb
       - ES_JAVA_OPTS=-Xms${ELASTICSEARCH_HEAP:-2g} -Xmx${ELASTICSEARCH_HEAP:-2g}
     mem_limit: 7g
     ports:

@@ -7,7 +7,6 @@ from mtrag.runtime.scheduler import (
 from mtrag.runtime.state import RunManifest, StageState, StageStatus
 from mtrag.runtime.thermal import (
     ThermalGuard,
-    ThermalSample,
     ThermalThresholds,
 )
 
@@ -20,7 +19,6 @@ __all__ = [
     "StageStatus",
     "SubprocessScheduler",
     "ThermalGuard",
-    "ThermalSample",
     "ThermalThresholds",
     "stable_key",
 ]
