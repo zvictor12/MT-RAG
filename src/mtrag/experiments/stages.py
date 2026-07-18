@@ -8,7 +8,7 @@ from mtrag.experiments.generation_stages import (
     generate_job,
     unload_ollama,
 )
-from mtrag.experiments.planning import PlannedStage, build_workflow
+from mtrag.experiments.planning import Workflow
 from mtrag.experiments.query_stages import encode_bge_query, rewrite_query
 from mtrag.experiments.retrieval_stages import (
     evaluate_task_a,
@@ -38,22 +38,12 @@ def run_stage(
     config: ExperimentConfig,
     artifacts: RunArtifacts,
     *,
-    schedule: str,
+    workflow: Workflow,
 ) -> None:
-    workflow = build_workflow(config, schedule=schedule)
     stage = workflow.stage(name)
-    artifacts.create_directories()
-    if _is_complete(stage, artifacts):
+    marker = artifacts.stage_marker(stage.fingerprint)
+    if stage.kind != "unload_ollama" and marker.is_file():
         print(f"reused {stage.name}", flush=True)
         return
     EXECUTORS[stage.kind](config, artifacts, **stage.params)
-    write_json_atomic(
-        artifacts.stage_marker(stage.fingerprint),
-        {"stage": stage.name},
-    )
-
-
-def _is_complete(stage: PlannedStage, artifacts: RunArtifacts) -> bool:
-    return stage.kind != "unload_ollama" and artifacts.stage_marker(
-        stage.fingerprint
-    ).is_file()
+    write_json_atomic(marker, {"stage": stage.name})

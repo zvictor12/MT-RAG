@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -17,32 +16,31 @@ from mtrag.experiments.spec import ExperimentConfig
 from mtrag.llm import HistoryQueryAgent, QueryRewriter
 from mtrag.llm.prompts import PromptTemplate
 from mtrag.runtime import SqliteCache, stable_key
-from mtrag.schemas import BenchmarkTask, BgeFeatures, QueryCase, QueryVariant
+from mtrag.schemas import ArtifactRef, BgeFeatures, QueryCase, QueryVariant
 
 
 SINGLE_TURN_REWRITE_VERSION = "single-turn-identity-v1"
 BGE_QUERY_CACHE_VERSION = "flagembedding-bge-m3-v1"
 
 
-def query_cases(
+def load_query_cases(
+    repository: BenchmarkRepository,
     config: ExperimentConfig,
     artifacts: RunArtifacts,
-    query_name: str,
-    query_revision: str,
+    query: ArtifactRef,
 ) -> tuple[QueryCase, ...]:
-    query = config.query(query_name)
-    repository = BenchmarkRepository(config.run.benchmark_root)
-    if query.kind == "last_turn_all":
+    query_config = config.query(query.name)
+    if query_config.kind == "last_turn_all":
         return repository.all_task_last_query_cases()
     variant = {
         "last_turn": QueryVariant.LAST,
         "gold": QueryVariant.GOLD,
-    }.get(query.kind)
+    }.get(query_config.kind)
     if variant is not None:
         return repository.query_cases(variant)
     return repository.query_cases(
         QueryVariant.QWEN,
-        qwen_queries=artifacts.rewrite(query_name, query_revision),
+        qwen_queries=artifacts.rewrite(query),
     )
 
 
@@ -50,137 +48,115 @@ def rewrite_query(
     config: ExperimentConfig,
     artifacts: RunArtifacts,
     *,
-    query_name: str,
-    query_revision: str,
+    query: ArtifactRef,
 ) -> None:
-    query = config.query(query_name)
+    query_config = config.query(query.name)
     tasks = BenchmarkRepository(config.run.benchmark_root).load_tasks()
-    checkpoint = JsonlCheckpoint(artifacts.rewrite(query_name, query_revision))
+    checkpoint = JsonlCheckpoint(artifacts.rewrite(query))
     pending = [task for task in tasks if task.task_id not in checkpoint.completed]
     if not pending:
-        if query.kind == "agentic":
-            _validate_agentic_rewrites(tasks, checkpoint.records)
         return
 
     client = ollama_client(config)
-    prompt = PromptTemplate.from_file(query.prompt)
-    answer_prompt = (
-        PromptTemplate.from_file(query.answer_prompt)
-        if getattr(query, "answer_prompt", None) is not None
-        else None
-    )
-    compose_prompt = (
-        PromptTemplate.from_file(query.compose_prompt)
-        if getattr(query, "compose_prompt", None) is not None
-        else None
-    )
-    model_identity, model_provenance = ollama_model_info(config)
+    prompt = PromptTemplate.from_file(query_config.prompt)
+    model = ollama_model_info(config)
     provenance = {
-        "rewrite_variant": query_name,
-        "temperature": query.temperature,
-        **model_provenance,
+        "rewrite_variant": query.name,
+        "temperature": query_config.temperature,
+        **model.provenance,
     }
 
     with SqliteCache(artifacts.cache) as cache:
-        common = {
-            "model_name": model_identity,
-            "cache": cache,
-            "guard": thermal_guard(config),
-            "max_tokens": query.max_tokens,
-            "temperature": query.temperature,
-        }
-        if query.kind == "agentic":
+        guard = thermal_guard(config)
+        if query_config.kind == "agentic":
+            answer_prompt = PromptTemplate.from_file(query_config.answer_prompt)
+            compose_prompt = PromptTemplate.from_file(query_config.compose_prompt)
             rewriter = HistoryQueryAgent(
                 client,
+                model_name=model.identity,
                 question_prompt=prompt,
                 answer_prompt=answer_prompt,
                 composition_prompt=compose_prompt,
-                **common,
+                cache=cache,
+                guard=guard,
+                max_tokens=query_config.max_tokens,
+                temperature=query_config.temperature,
             )
             prompt_revision = ":".join(
                 (prompt.sha256, answer_prompt.sha256, compose_prompt.sha256)
             )
         else:
-            rewriter = QueryRewriter(client, prompt=prompt, **common)
+            rewriter = QueryRewriter(
+                client,
+                model_name=model.identity,
+                prompt=prompt,
+                cache=cache,
+                guard=guard,
+                max_tokens=query_config.max_tokens,
+                temperature=query_config.temperature,
+            )
             prompt_revision = prompt.sha256
+
         try:
             for index, task in enumerate(pending, start=1):
+                details = {}
+                if task.turn == 1:
+                    rewritten = task.final_question
+                    method = "identity"
+                    revision = SINGLE_TURN_REWRITE_VERSION
+                elif query_config.kind == "agentic":
+                    outcome = rewriter.rewrite(task)
+                    rewritten = outcome.query
+                    method = "history_agent"
+                    revision = prompt_revision
+                    details = {
+                        "resolution": outcome.resolution,
+                        "clarification_questions": outcome.questions,
+                        "resolution_status": outcome.status,
+                        "evidence_ids": outcome.evidence_ids,
+                    }
+                    if outcome.composition is not None:
+                        details["composition"] = outcome.composition
+                else:
+                    rewritten = rewriter.rewrite(task)
+                    method = "qwen"
+                    revision = prompt_revision
+
                 checkpoint.append(
-                    _rewrite_record(
-                        task,
-                        rewriter,
-                        prompt_revision,
-                        provenance,
-                        agentic=query.kind == "agentic",
-                    )
+                    {
+                        "task_id": task.task_id,
+                        "query": rewritten,
+                        "rewrite_method": method,
+                        "rewrite_version": revision,
+                        **details,
+                        **provenance,
+                    }
                 )
                 if index % 10 == 0 or index == len(pending):
                     progress(
-                        f"rewrite {query_name}",
+                        f"rewrite {query.name}",
                         len(tasks) - len(pending) + index,
                         len(tasks),
                     )
         finally:
             client.unload()
-    if query.kind == "agentic":
-        _validate_agentic_rewrites(tasks, checkpoint.records)
-
-
-def _rewrite_record(
-    task: BenchmarkTask,
-    rewriter: QueryRewriter | HistoryQueryAgent,
-    prompt_revision: str,
-    provenance: dict,
-    *,
-    agentic: bool,
-) -> dict:
-    details = {}
-    if task.turn == 1:
-        query = _final_user_question(task)
-        method = "identity"
-        revision = SINGLE_TURN_REWRITE_VERSION
-    elif agentic:
-        outcome = rewriter.rewrite(task)
-        query = outcome.query
-        method = "history_agent"
-        revision = prompt_revision
-        details["resolution"] = outcome.resolution
-        details["clarification_questions"] = outcome.questions
-        details["resolution_status"] = outcome.status
-        details["evidence_ids"] = outcome.evidence_ids
-        if outcome.composition is not None:
-            details["composition"] = outcome.composition
-    else:
-        query = rewriter.rewrite(task)
-        method = "qwen"
-        revision = prompt_revision
-    return {
-        "task_id": task.task_id,
-        "query": query,
-        "rewrite_method": method,
-        "rewrite_version": revision,
-        **details,
-        **provenance,
-    }
 
 
 def encode_bge_query(
     config: ExperimentConfig,
     artifacts: RunArtifacts,
     *,
-    query_name: str,
-    query_revision: str,
-    feature_revision: str,
+    query: ArtifactRef,
+    features: ArtifactRef,
 ) -> None:
-    cases = query_cases(config, artifacts, query_name, query_revision)
-    features = _encode_texts(config, cases, artifacts.cache)
-    BgeFeatureStore(
-        artifacts.bge_features(query_name, feature_revision)
-    ).save(features)
-    print(f"saved {len(features)} BGE query feature sets", flush=True)
+    repository = BenchmarkRepository(config.run.benchmark_root)
+    cases = load_query_cases(repository, config, artifacts, query)
+    encoded = _encode_query_cases(config, cases, artifacts.cache)
+    BgeFeatureStore(artifacts.bge_features(features)).save(encoded)
+    print(f"saved {len(encoded)} BGE query feature sets", flush=True)
 
 
-def _encode_texts(
+def _encode_query_cases(
     config: ExperimentConfig,
     cases: Sequence[QueryCase],
     cache_path: Path,
@@ -197,14 +173,13 @@ def _encode_texts(
             )
             for text in texts
         }
-        features: dict[str, BgeFeatures] = {}
-        missing: list[str] = []
-        for text, key in keys.items():
-            value = cache.get(namespace, key)
-            if value is None:
-                missing.append(text)
-            else:
-                features[text] = _cached_features(value)
+        cached = {text: cache.get(namespace, key) for text, key in keys.items()}
+        features = {
+            text: BgeFeatures(tuple(value["dense"]), value["sparse"])
+            for text, value in cached.items()
+            if value is not None
+        }
+        missing = [text for text, value in cached.items() if value is None]
 
         if missing:
             with BGEM3QueryEncoder(
@@ -216,16 +191,16 @@ def _encode_texts(
                 step = max(256, config.models.bge_batch_size * 8)
                 for start in range(0, len(missing), step):
                     batch = missing[start : start + step]
-                    encoded = encoder.encode(batch)
-                    features.update(zip(batch, encoded, strict=True))
+                    encoded = dict(zip(batch, encoder.encode(batch), strict=True))
+                    features.update(encoded)
                     cache.put_many(
                         namespace,
                         {
                             keys[text]: {
-                                "dense": list(value.dense),
+                                "dense": value.dense,
                                 "sparse": value.sparse,
                             }
-                            for text, value in zip(batch, encoded, strict=True)
+                            for text, value in encoded.items()
                         },
                     )
                     progress(
@@ -234,58 +209,3 @@ def _encode_texts(
                         len(missing),
                     )
     return {case.task_id: features[case.text] for case in cases}
-
-
-def _cached_features(value) -> BgeFeatures:
-    return BgeFeatures(
-        dense=tuple(float(number) for number in value["dense"]),
-        sparse={
-            str(token): float(weight)
-            for token, weight in value["sparse"].items()
-        },
-    )
-
-
-def _final_user_question(task: BenchmarkTask) -> str:
-    return next(
-        message.text
-        for message in reversed(task.messages)
-        if message.speaker == "user"
-    )
-
-
-def _validate_agentic_rewrites(
-    tasks: Sequence[BenchmarkTask],
-    records: dict[str, dict],
-) -> None:
-    expected = {task.task_id for task in tasks}
-    actual = set(records)
-    if actual != expected:
-        raise RuntimeError(
-            f"agentic rewrite is incomplete: {len(actual)}/{len(expected)}"
-        )
-
-    statuses = Counter(
-        record.get("resolution_status", "identity")
-        for record in records.values()
-    )
-    invalid = set(statuses) - {"identity", "standalone", "resolved"}
-    if invalid:
-        raise RuntimeError(
-            "agentic rewrite contains invalid statuses: "
-            + ", ".join(sorted(invalid))
-        )
-
-    for task in tasks:
-        record = records[task.task_id]
-        status = record.get("resolution_status", "identity")
-        if task.turn == 1 and status != "identity":
-            raise RuntimeError(f"turn 1 was rewritten: {task.task_id}")
-        if task.turn > 1 and status == "identity":
-            raise RuntimeError(f"multi-turn query bypassed agent: {task.task_id}")
-
-    print(
-        "agentic rewrite: "
-        + ", ".join(f"{key}={statuses[key]}" for key in sorted(statuses)),
-        flush=True,
-    )

@@ -16,6 +16,13 @@ from mtrag.runtime import ThermalGuard
 from mtrag.runtime.state import write_json_atomic
 
 
+def positive_int(value: str) -> int:
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError("expected a positive integer")
+    return number
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -38,15 +45,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--device",
         default=os.getenv("BERTSCORE_DEVICE", "cuda:0"),
     )
-    parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--batch-size", type=positive_int, default=4)
     parser.add_argument(
         "--chunk-size",
-        type=int,
+        type=positive_int,
         help="Pairs between thermal checks; defaults to 8 model batches.",
     )
     parser.add_argument(
         "--limit",
-        type=int,
+        type=positive_int,
         help="Evaluate only the first N records for a smoke test.",
     )
     return parser.parse_args(argv)
@@ -54,13 +61,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
-    if args.batch_size <= 0:
-        raise ValueError("--batch-size must be positive")
-    if args.chunk_size is not None and args.chunk_size <= 0:
-        raise ValueError("--chunk-size must be positive")
-    if args.limit is not None and args.limit <= 0:
-        raise ValueError("--limit must be positive")
-
     records = read_jsonl(args.input)
     if args.limit is not None:
         records = records[: args.limit]

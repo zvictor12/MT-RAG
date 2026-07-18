@@ -5,7 +5,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
 
-from mtrag.config import Settings, settings
+from mtrag.config import settings
 
 
 def _session() -> requests.Session:
@@ -28,13 +28,29 @@ def _session() -> requests.Session:
 
 
 class OllamaClient:
-    def __init__(self, config: Settings = settings) -> None:
-        self.config = config
+    def __init__(
+        self,
+        *,
+        url: str = settings.ollama_url,
+        model: str = settings.ollama_model,
+        num_ctx: int = settings.ollama_num_ctx,
+        num_predict: int = settings.ollama_num_predict,
+        seed: int = settings.ollama_seed,
+        keep_alive: str = settings.ollama_keep_alive,
+        timeout: int = settings.ollama_timeout,
+    ) -> None:
+        self.url = url
+        self.model = model
+        self.num_ctx = num_ctx
+        self.num_predict = num_predict
+        self.seed = seed
+        self.keep_alive = keep_alive
+        self.timeout = timeout
         self.session = _session()
 
     @property
     def model_name(self) -> str:
-        return self.config.ollama_model
+        return self.model
 
     def chat(
         self,
@@ -44,36 +60,36 @@ class OllamaClient:
         options: Mapping[str, Any] | None = None,
     ) -> str:
         request_options: dict[str, Any] = {
-            "num_ctx": self.config.ollama_num_ctx,
-            "num_predict": self.config.ollama_num_predict,
+            "num_ctx": self.num_ctx,
+            "num_predict": self.num_predict,
             "temperature": 0,
-            "seed": self.config.ollama_seed,
+            "seed": self.seed,
         }
         if options is not None:
             request_options.update(options)
 
         payload: dict[str, Any] = {
-            "model": self.config.ollama_model,
+            "model": self.model,
             "messages": list(messages),
             "stream": False,
             "think": False,
-            "keep_alive": self.config.ollama_keep_alive,
+            "keep_alive": self.keep_alive,
             "options": request_options,
         }
         if output_schema is not None:
             payload["format"] = output_schema
 
         response = self.session.post(
-            f"{self.config.ollama_url}/api/chat",
+            f"{self.url}/api/chat",
             json=payload,
-            timeout=self.config.ollama_timeout,
+            timeout=self.timeout,
         )
         response.raise_for_status()
         return response.json()["message"]["content"]
 
     def installed_model_digests(self) -> dict[str, str]:
         response = self.session.get(
-            f"{self.config.ollama_url}/api/tags",
+            f"{self.url}/api/tags",
             timeout=10,
         )
         response.raise_for_status()
@@ -82,45 +98,15 @@ class OllamaClient:
             for model in response.json()["models"]
         }
 
-    def installed_models(self) -> set[str]:
-        return set(self.installed_model_digests())
-
     def unload(self) -> None:
         response = self.session.post(
-            f"{self.config.ollama_url}/api/generate",
+            f"{self.url}/api/generate",
             json={
-                "model": self.config.ollama_model,
+                "model": self.model,
                 "prompt": "",
                 "stream": False,
                 "keep_alive": 0,
             },
-            timeout=self.config.ollama_timeout,
+            timeout=self.timeout,
         )
         response.raise_for_status()
-
-
-_default_client = OllamaClient()
-
-
-def chat(
-    messages: Sequence[Mapping[str, str]],
-    *,
-    output_schema: Mapping[str, Any] | None = None,
-    think: bool = False,
-    options: Mapping[str, Any] | None = None,
-) -> str:
-    if think:
-        raise ValueError("Thinking is intentionally disabled for this pipeline")
-    return _default_client.chat(
-        messages,
-        output_schema=output_schema,
-        options=options,
-    )
-
-
-def installed_models() -> set[str]:
-    return _default_client.installed_models()
-
-
-def unload() -> None:
-    _default_client.unload()

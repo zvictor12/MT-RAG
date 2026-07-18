@@ -54,11 +54,3 @@ def write_jsonl(
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
-
-
-def append_jsonl(path: str | Path, row: Mapping[str, Any]) -> None:
-    destination = Path(path)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    with destination.open("a", encoding="utf-8") as stream:
-        stream.write(json.dumps(row, ensure_ascii=False))
-        stream.write("\n")

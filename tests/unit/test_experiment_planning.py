@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 from mtrag.data.benchmark import DOMAINS
-from mtrag.experiments.planning import build_plan, build_workflow
+from mtrag.experiments.planning import Workflow, build_plan, build_workflow
 from mtrag.experiments.spec import ExperimentConfig
 
 
@@ -136,10 +136,10 @@ def fixture(root: Path, temperature: float = 0.2) -> ExperimentConfig:
 
 def output_revision(workflow, reference: str) -> str:
     return next(
-        stage.params["revision"]
+        stage.params["output"].revision
         for stage in workflow.stages
         if stage.kind in {"retrieve", "fuse", "rerank"}
-        and stage.params["reference"] == reference
+        and stage.params["output"].name == reference
     )
 
 
@@ -147,7 +147,7 @@ def rewrite_fingerprint(workflow, query_name: str) -> str:
     return next(
         stage.fingerprint
         for stage in workflow.stages
-        if stage.kind == "rewrite" and stage.params["query_name"] == query_name
+        if stage.kind == "rewrite" and stage.params["query"].name == query_name
     )
 
 
@@ -165,7 +165,7 @@ class ExperimentPlanTest(unittest.TestCase):
         )
         self.assertEqual(workflow.stages[1].params["method"], "elser")
         self.assertEqual(
-            workflow.stages[2].params["source_reference"],
+            workflow.stages[2].params["source"].name,
             "elser_agentic.base",
         )
 
@@ -178,7 +178,13 @@ class ExperimentPlanTest(unittest.TestCase):
         self.assertTrue(any(name.startswith("rerank.bge_last") for name in names))
         self.assertTrue(any(name.startswith("generate.answer") for name in names))
         self.assertFalse(any("elser" in name for name in names))
-        self.assertFalse(any(word in name for name in names for word in ("decide", "select", "winner")))
+        self.assertFalse(
+            any(
+                word in name
+                for name in names
+                for word in ("decide", "select", "winner")
+            )
+        )
 
     def test_generation_is_grouped_around_one_model_switch(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -200,7 +206,7 @@ class ExperimentPlanTest(unittest.TestCase):
         )
         self.assertEqual(evaluate.dependencies, (unload.name,))
         self.assertEqual(
-            [job["job_name"] for job in evaluate.params["jobs"]],
+            [job["generation"].name for job in evaluate.params["jobs"]],
             ["answer"],
         )
 
@@ -313,13 +319,13 @@ class ExperimentPlanTest(unittest.TestCase):
                 stage.fingerprint
                 for stage in first.stages
                 if stage.kind == "evaluate_task_a"
-                and stage.params["reference"] == "bge_last.rrf_reranked"
+                and stage.params["output"].name == "bge_last.rrf_reranked"
             ),
             next(
                 stage.fingerprint
                 for stage in second.stages
                 if stage.kind == "evaluate_task_a"
-                and stage.params["reference"] == "bge_last.rrf_reranked"
+                and stage.params["output"].name == "bge_last.rrf_reranked"
             ),
         )
 
@@ -342,17 +348,34 @@ class ExperimentPlanTest(unittest.TestCase):
             output_revision(second, "bge_qwen.dense"),
         )
 
-    def test_stage_commands_rebuild_the_named_schedule(self) -> None:
+    def test_workflow_plan_round_trip_preserves_artifact_refs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workflow = build_workflow(fixture(root), schedule="bge")
+
+            loaded = Workflow.load(workflow.save(root / "run"))
+
+        self.assertEqual(loaded, workflow)
+
+    def test_stage_commands_use_saved_plan_without_schedule_rebuild(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             config = fixture(root)
             run_dir = root / "run"
-            plan = build_plan(config, run_dir, schedule="elser")
+            workflow = build_workflow(config, schedule="elser")
+            plan_path = workflow.save(run_dir)
+            plan = build_plan(
+                config,
+                run_dir,
+                workflow=workflow,
+                plan_path=plan_path,
+            )
 
         for stage in plan:
             self.assertIn(stage.name, stage.command)
-            self.assertIn("--schedule", stage.command)
-            self.assertIn("elser", stage.command)
+            self.assertNotIn("--schedule", stage.command)
+            self.assertIn("--plan", stage.command)
+            self.assertIn(str(plan_path), stage.command)
             self.assertIn(str(run_dir.resolve()), stage.command)
 
 

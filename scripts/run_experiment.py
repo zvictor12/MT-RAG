@@ -5,11 +5,12 @@ import os
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 from mtrag.experiments.artifacts import RunArtifacts
 from mtrag.experiments.common import thermal_guard
-from mtrag.experiments.planning import build_plan, build_workflow
+from mtrag.experiments.planning import Workflow, build_plan, build_workflow
 from mtrag.experiments.preflight import preflight
 from mtrag.experiments.reporting import render_experiment_results
 from mtrag.experiments.spec import ExperimentConfig
@@ -20,14 +21,10 @@ from mtrag.runtime import SubprocessScheduler
 DEFAULT_CONFIG = Path("configs/experiment.toml")
 
 
-def _shared(
-    parser: argparse.ArgumentParser,
-    *,
-    include_schedule: bool = False,
-) -> None:
+def _shared(parser: argparse.ArgumentParser, *, schedule: bool = False) -> None:
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--run-dir", type=Path)
-    if include_schedule:
+    if schedule:
         parser.add_argument("--schedule", default="bge")
 
 
@@ -36,36 +33,23 @@ def parse_args() -> argparse.Namespace:
         description="Run and resume config-declared MT-RAG experiments."
     )
     commands = parser.add_subparsers(dest="command", required=True)
-
-    plan = commands.add_parser("plan", help="print a configured schedule")
-    _shared(plan, include_schedule=True)
-
-    check = commands.add_parser("preflight", help="validate local services and models")
-    _shared(check, include_schedule=True)
-
-    run = commands.add_parser("run", help="run or resume a configured schedule")
-    _shared(run, include_schedule=True)
-
-    status = commands.add_parser("status", help="show one schedule's stage state")
-    _shared(status, include_schedule=True)
-
-    results = commands.add_parser("results", help="print every stored metric report")
-    _shared(results)
-
-    stage = commands.add_parser("stage", help="run one scheduler stage")
+    for name, help_text in (
+        ("plan", "print a configured schedule"),
+        ("preflight", "validate local services and models"),
+        ("run", "run or resume a configured schedule"),
+        ("status", "show one schedule's stage state"),
+    ):
+        _shared(commands.add_parser(name, help=help_text), schedule=True)
+    _shared(commands.add_parser("results", help="print stored metric reports"))
+    stage = commands.add_parser("stage", help=argparse.SUPPRESS)
     stage.add_argument("name")
-    _shared(stage, include_schedule=True)
+    stage.add_argument("--plan", type=Path, required=True)
+    _shared(stage)
     return parser.parse_args()
 
 
-def _load(args: argparse.Namespace) -> tuple[ExperimentConfig, Path]:
-    config = ExperimentConfig.load(args.config)
-    run_dir = (args.run_dir or config.default_run_dir).expanduser().resolve()
-    return config, run_dir
-
-
 @contextmanager
-def _config_snapshot(path: Path) -> Iterator[Path]:
+def config_snapshot(path: Path) -> Iterator[Path]:
     source = path.expanduser().resolve()
     descriptor, temporary_name = tempfile.mkstemp(
         dir=source.parent,
@@ -82,96 +66,103 @@ def _config_snapshot(path: Path) -> Iterator[Path]:
 
 
 @contextmanager
-def _campaign_lock(run_dir: Path) -> Iterator[None]:
+def campaign_lock(run_dir: Path) -> Iterator[None]:
     run_dir.mkdir(parents=True, exist_ok=True)
     with (run_dir / ".scheduler.lock").open("a+") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
-            raise RuntimeError(
-                f"another scheduler is already using {run_dir}"
-            ) from error
+            raise RuntimeError(f"another scheduler is using {run_dir}") from error
         yield
 
 
-def print_plan(config: ExperimentConfig, run_dir: Path, *, schedule: str) -> None:
-    for stage in build_plan(config, run_dir, schedule=schedule):
-        dependencies = ", ".join(stage.dependencies) or "-"
-        resource = "GPU" if stage.resources.gpu else "CPU"
-        print(f"{stage.name}  after={dependencies}  {resource}/{stage.resources.cpu_slots}")
+@dataclass(frozen=True, slots=True)
+class ExperimentApp:
+    config: ExperimentConfig
+    run_dir: Path
+
+    @classmethod
+    def load(cls, config_path: Path, run_dir: Path | None) -> "ExperimentApp":
+        config = ExperimentConfig.load(config_path)
+        root = (run_dir or config.default_run_dir).expanduser().resolve()
+        return cls(config, root)
+
+    def show_plan(self, schedule: str) -> None:
+        for stage in build_workflow(self.config, schedule=schedule).stages:
+            dependencies = ", ".join(stage.dependencies) or "-"
+            resource = "GPU" if stage.gpu else "CPU"
+            print(
+                f"{stage.name}  after={dependencies}  "
+                f"{resource}/{stage.cpu_slots}"
+            )
+
+    def show_status(self, workflow: Workflow) -> int:
+        path = self.run_dir / "manifest.json"
+        if not path.exists():
+            print(f"run has not started: {path}")
+            return 1
+        states = json.loads(path.read_text(encoding="utf-8"))["stages"]
+        shown = [stage.name for stage in workflow.stages if stage.name in states]
+        for name in shown:
+            state = states[name]
+            print(f"{name}  {state['status']}  attempts={state.get('attempts', 0)}")
+        if not shown:
+            print("no recorded stages for this schedule")
+        return 0
+
+    def check(self, schedule: str) -> None:
+        workflow = build_workflow(self.config, schedule=schedule)
+        preflight(self.config, stages=workflow.stages)
+
+    def run(self, schedule: str) -> int:
+        with campaign_lock(self.run_dir):
+            workflow = build_workflow(self.config, schedule=schedule)
+            print(f"run directory: {self.run_dir}", flush=True)
+            print(f"stage logs: {self.run_dir / 'logs'}", flush=True)
+            preflight(self.config, stages=workflow.stages)
+            plan_path = workflow.save(self.run_dir)
+            plan = build_plan(
+                self.config,
+                self.run_dir,
+                workflow=workflow,
+                plan_path=plan_path,
+            )
+            manifest = SubprocessScheduler(
+                plan,
+                self.run_dir,
+                cpu_slots=self.config.run.cpu_slots,
+                thermal_guard=thermal_guard(self.config),
+                resume=True,
+            ).run_sync()
+            self.show_status(workflow)
+            return 0 if manifest.complete_for(stage.name for stage in plan) else 1
 
 
-def print_status(run_dir: Path, stage_names: set[str] | None = None) -> None:
-    manifest_path = run_dir / "manifest.json"
-    if not manifest_path.exists():
-        raise SystemExit(f"run has not started: {manifest_path}")
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    shown = 0
-    for name, state in manifest["stages"].items():
-        if stage_names is not None and name not in stage_names:
-            continue
-        shown += 1
-        print(
-            f"{name}  {state['status']}  attempts={state.get('attempts', 0)}"
-        )
-    if shown == 0:
-        print("no recorded stages for this schedule")
-
-
-def main() -> None:
+def main() -> int:
     args = parse_args()
     if args.command == "run":
-        with _config_snapshot(args.config) as snapshot:
-            args.config = snapshot
-            _run(args)
-        return
+        with config_snapshot(args.config) as snapshot:
+            return ExperimentApp.load(snapshot, args.run_dir).run(args.schedule)
 
-    config, run_dir = _load(args)
-
+    app = ExperimentApp.load(args.config, args.run_dir)
     if args.command == "plan":
-        print_plan(config, run_dir, schedule=args.schedule)
-        return
-    if args.command == "preflight":
-        workflow = build_workflow(config, schedule=args.schedule)
-        preflight(config, RunArtifacts(run_dir), stages=workflow.stages)
-        return
-    if args.command == "status":
-        plan = build_plan(config, run_dir, schedule=args.schedule)
-        print_status(run_dir, {stage.name for stage in plan})
-        return
-    if args.command == "results":
-        print(render_experiment_results(run_dir))
-        return
-    if args.command == "stage":
+        app.show_plan(args.schedule)
+    elif args.command == "preflight":
+        app.check(args.schedule)
+    elif args.command == "status":
+        workflow = build_workflow(app.config, schedule=args.schedule)
+        return app.show_status(workflow)
+    elif args.command == "results":
+        print(render_experiment_results(app.run_dir))
+    else:
         run_stage(
             args.name,
-            config,
-            RunArtifacts(run_dir),
-            schedule=args.schedule,
+            app.config,
+            RunArtifacts(app.run_dir),
+            workflow=Workflow.load(args.plan),
         )
-        return
-
-
-def _run(args: argparse.Namespace) -> None:
-    config, run_dir = _load(args)
-    with _campaign_lock(run_dir):
-        print(f"run directory: {run_dir}", flush=True)
-        print(f"stage logs: {run_dir / 'logs'}", flush=True)
-        workflow = build_workflow(config, schedule=args.schedule)
-        preflight(config, RunArtifacts(run_dir), stages=workflow.stages)
-        plan = build_plan(config, run_dir, schedule=args.schedule)
-        scheduler = SubprocessScheduler(
-            plan,
-            run_dir,
-            cpu_slots=config.run.cpu_slots,
-            thermal_guard=thermal_guard(config),
-            resume=True,
-        )
-        manifest = scheduler.run_sync()
-        print_status(run_dir, {stage.name for stage in plan})
-        if not manifest.complete_for(stage.name for stage in plan):
-            raise SystemExit(1)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

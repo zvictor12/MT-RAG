@@ -2,19 +2,17 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from mtrag.data.jsonl import append_jsonl, read_jsonl, write_jsonl
+from mtrag.data.jsonl import read_jsonl, write_jsonl
 
 
 class JsonlTests(unittest.TestCase):
-    def test_write_read_and_append_round_trip(self) -> None:
+    def test_write_and_read_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "nested" / "rows.jsonl"
             write_jsonl(path, [{"text": "Привет"}, {"number": 2}])
-            append_jsonl(path, {"done": True})
-
             self.assertEqual(
                 read_jsonl(path),
-                [{"text": "Привет"}, {"number": 2}, {"done": True}],
+                [{"text": "Привет"}, {"number": 2}],
             )
 
     def test_decode_error_contains_path_and_line(self) -> None:

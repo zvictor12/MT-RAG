@@ -19,8 +19,6 @@ class BGEM3QueryEncoder:
         guard_chunk_size: int = 256,
         guard: BatchGuard | None = None,
     ) -> None:
-        if batch_size <= 0 or guard_chunk_size <= 0:
-            raise ValueError("batch sizes must be positive")
         self.model_path = model_path
         self.device = device
         self.batch_size = batch_size
@@ -33,7 +31,6 @@ class BGEM3QueryEncoder:
         if self._model is not None:
             return self._model
 
-        import torch
         from FlagEmbedding import BGEM3FlagModel
         from FlagEmbedding.inference.embedder.encoder_only import m3 as m3_module
 
@@ -41,11 +38,6 @@ class BGEM3QueryEncoder:
         # The experiment emits one durable checkpoint progress line instead.
         m3_module.tqdm = lambda iterable, *args, **kwargs: iterable
         m3_module.trange = lambda *args, **kwargs: range(*args)
-
-        if self.device.startswith("cuda") and not torch.cuda.is_available():
-            raise RuntimeError("CUDA is unavailable")
-        if not self.model_path.is_dir():
-            raise RuntimeError(f"BGE-M3 model is missing: {self.model_path}")
 
         self._model = BGEM3FlagModel(
             str(self.model_path),

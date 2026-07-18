@@ -35,7 +35,7 @@ class ResourcePoolTest(unittest.TestCase):
 
 
 class SchedulerTest(unittest.TestCase):
-    def test_dependencies_condition_and_logs(self) -> None:
+    def test_dependencies_and_logs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             output = root / "order.json"
@@ -49,15 +49,9 @@ class SchedulerTest(unittest.TestCase):
             stages = (
                 StageSpec("first", python_command(write, output) + ("first",)),
                 StageSpec(
-                    "optional",
-                    python_command(write, output) + ("optional",),
-                    dependencies=("first",),
-                    condition=lambda _manifest: False,
-                ),
-                StageSpec(
                     "last",
                     python_command(write, output) + ("last",),
-                    dependencies=("optional",),
+                    dependencies=("first",),
                 ),
             )
 
@@ -68,13 +62,38 @@ class SchedulerTest(unittest.TestCase):
                 resume=False,
             ).run_sync()
 
-            self.assertTrue(manifest.complete)
+            self.assertTrue(manifest.complete_for(("first", "last")))
             self.assertEqual(json.loads(output.read_text()), ["first", "last"])
             self.assertEqual(
-                manifest.stages["optional"].status,
-                StageStatus.SKIPPED,
+                manifest.stages["last"].status,
+                StageStatus.SUCCEEDED,
             )
             self.assertTrue((root / "run/logs/first.log").exists())
+
+    def test_failed_command_is_retried(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            counter = root / "attempts.txt"
+            fail_once = (
+                "import pathlib, sys; p=pathlib.Path(sys.argv[1]); "
+                "n=int(p.read_text()) if p.exists() else 0; "
+                "p.write_text(str(n+1)); raise SystemExit(4 if n == 0 else 0)"
+            )
+            stage = StageSpec(
+                "retry",
+                python_command(fail_once, counter),
+                max_attempts=2,
+                retry_delay=0,
+            )
+
+            manifest = SubprocessScheduler((stage,), root, resume=False).run_sync()
+
+            self.assertEqual(counter.read_text(), "2")
+            self.assertEqual(manifest.stages["retry"].attempts, 2)
+            self.assertEqual(
+                manifest.stages["retry"].status,
+                StageStatus.SUCCEEDED,
+            )
 
     def test_failure_blocks_dependent_stage(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -137,7 +156,7 @@ class SchedulerTest(unittest.TestCase):
             ).run_sync()
 
             self.assertEqual(counter.read_text(), "2")
-            self.assertTrue(second.complete)
+            self.assertTrue(second.complete_for(("once", "retry_later")))
             self.assertEqual(second.stages["retry_later"].attempts, 2)
 
     def test_inactive_pending_stage_does_not_block_another_schedule(self) -> None:

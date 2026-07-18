@@ -18,10 +18,6 @@ GENERATION_METRICS = (
 )
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
 def _metric(
     metrics: Mapping[str, Any],
     name: str,
@@ -59,25 +55,21 @@ def _table(headers: Sequence[str], rows: Iterable[Sequence[str]]) -> str:
 
 
 def _retrieval_reports(run_dir: Path) -> list[tuple[str, Path]]:
-    current = []
+    reports = []
     for path in sorted(
         (run_dir / "experiments").glob(
             "*/*/*/evaluation/*/task-a-metrics.json"
         )
     ):
         parts = path.relative_to(run_dir).parts
-        current.append(
+        reports.append(
             (
                 f"{parts[1]}.{parts[2]}@{parts[3][:8]}"
                 f"/eval@{parts[5][:8]}",
                 path,
             )
         )
-    legacy = [
-        (f"legacy:{path.stem}", path)
-        for path in sorted((run_dir / "evaluation" / "retrieval").glob("*.json"))
-    ]
-    return current + legacy
+    return reports
 
 
 def _retrieval_report(run_dir: Path) -> str | None:
@@ -93,7 +85,7 @@ def _retrieval_report(run_dir: Path) -> str | None:
     rows = []
     query_counts: set[int] = set()
     for label, path in reports:
-        report = _read_json(path)
+        report = json.loads(path.read_text(encoding="utf-8"))
         query_count = report.get("query_count")
         if isinstance(query_count, int):
             query_counts.add(query_count)
@@ -116,19 +108,15 @@ def _retrieval_report(run_dir: Path) -> str | None:
 
 
 def _generation_reports(run_dir: Path) -> list[tuple[str, Path]]:
-    current = []
+    reports = []
     for path in sorted(
         (run_dir / "generation").glob("*/*/evaluation/*/ibm-summary.json")
     ):
         parts = path.relative_to(run_dir).parts
-        current.append(
+        reports.append(
             (f"{parts[1]}@{parts[2][:8]}/eval@{parts[4][:8]}", path)
         )
-    legacy = [
-        (f"legacy:{path.stem}", path)
-        for path in sorted((run_dir / "evaluation" / "generation").glob("*.json"))
-    ]
-    return current + legacy
+    return reports
 
 
 def _generation_report(run_dir: Path) -> str | None:
@@ -148,7 +136,7 @@ def _generation_report(run_dir: Path) -> str | None:
     )
     rows = []
     for label, path in reports:
-        report = _read_json(path)
+        report = json.loads(path.read_text(encoding="utf-8"))
         metrics = report.get("metrics") or {}
         rows.append(
             (
@@ -172,6 +160,4 @@ def render_experiment_results(run_dir: Path) -> str:
         )
         if section
     ]
-    if not sections:
-        raise FileNotFoundError(f"no experiment results found in {run_dir}")
-    return "\n\n".join(sections)
+    return "\n\n".join(sections) or f"no experiment results in {run_dir}"

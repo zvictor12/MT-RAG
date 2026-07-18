@@ -42,10 +42,11 @@ def build_rewrite_messages(
     *,
     prompt: PromptTemplate = DEFAULT_REWRITE_PROMPT,
 ) -> list[dict[str, str]]:
-    history, question = _history_and_question(task.messages)
     request = {
-        "conversation_history": [_message_record(message) for message in history],
-        "final_user_question": question,
+        "conversation_history": [
+            _message_record(message) for message in task.history
+        ],
+        "final_user_question": task.final_question,
     }
     return [
         {"role": "system", "content": prompt.text},
@@ -61,13 +62,12 @@ def build_history_question_messages(
     *,
     prompt: PromptTemplate,
 ) -> list[dict[str, str]]:
-    _history, question = _history_and_question(task.messages)
     return [
         {"role": "system", "content": prompt.text},
         {
             "role": "user",
             "content": json.dumps(
-                {"current_question": question},
+                {"current_question": task.final_question},
                 ensure_ascii=False,
                 indent=2,
             ),
@@ -81,9 +81,8 @@ def build_history_answer_messages(
     *,
     prompt: PromptTemplate,
 ) -> list[dict[str, str]]:
-    history, _question = _history_and_question(task.messages)
     request = {
-        "history": numbered_history(history),
+        "history": numbered_history(task.history),
         "questions": [
             {"id": f"Q{index}", "text": question}
             for index, question in enumerate(questions, start=1)
@@ -104,9 +103,8 @@ def build_grounded_rewrite_messages(
     *,
     prompt: PromptTemplate,
 ) -> list[dict[str, str]]:
-    _history, question = _history_and_question(task.messages)
     request = {
-        "current_question": question,
+        "current_question": task.final_question,
         "resolved_dependencies": list(dependencies),
     }
     return [
@@ -124,10 +122,11 @@ def build_generator_messages(
     *,
     prompt: PromptTemplate = DEFAULT_GENERATOR_PROMPT,
 ) -> list[dict[str, str]]:
-    history, question = _history_and_question(task.messages)
     request = {
-        "conversation_history": [_message_record(message) for message in history],
-        "final_user_question": question,
+        "conversation_history": [
+            _message_record(message) for message in task.history
+        ],
+        "final_user_question": task.final_question,
         "passages": [_context_record(context) for context in contexts],
     }
     return [
@@ -137,15 +136,6 @@ def build_generator_messages(
             "content": json.dumps(request, ensure_ascii=False, indent=2),
         },
     ]
-
-
-def _history_and_question(
-    messages: Sequence[Message],
-) -> tuple[tuple[Message, ...], str]:
-    for index in range(len(messages) - 1, -1, -1):
-        if messages[index].speaker == "user":
-            return tuple(messages[:index]), messages[index].text
-    raise ValueError("A benchmark task must contain a user message")
 
 
 def _message_record(message: Message) -> dict[str, str]:

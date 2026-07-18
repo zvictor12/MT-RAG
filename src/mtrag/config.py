@@ -25,19 +25,6 @@ class Settings:
     benchmark_root: Path = Path(
         os.getenv("MTRAG_BENCHMARK_ROOT", "../mt-rag-benchmark")
     ).expanduser()
-    bge_model_path: Path = Path(
-        os.getenv("BGE_MODEL_PATH", "~/.cache/mtrag/models/bge-m3")
-    ).expanduser()
-    reranker_model_path: Path = Path(
-        os.getenv(
-            "RERANKER_MODEL_PATH",
-            "~/.cache/mtrag/models/bge-reranker-v2-m3",
-        )
-    ).expanduser()
-    bge_batch_size: int = int(os.getenv("BGE_BATCH_SIZE", "32"))
-    bge_max_length: int = int(os.getenv("BGE_MAX_LENGTH", "512"))
-    reranker_batch_size: int = int(os.getenv("RERANKER_BATCH_SIZE", "8"))
-    reranker_max_length: int = int(os.getenv("RERANKER_MAX_LENGTH", "512"))
 
 
 settings = Settings()

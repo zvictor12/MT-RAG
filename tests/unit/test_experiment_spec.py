@@ -97,6 +97,24 @@ class ExperimentConfigTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "official limit"):
                 ExperimentConfig.load(write_config(root, text))
 
+    def test_semantic_errors_are_reported_together(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            text = MINIMAL_CONFIG.replace(
+                "prediction_top_k = 10",
+                "prediction_top_k = 11",
+            ).replace(
+                "microsoft/deberta-xlarge-mnli",
+                "another/model",
+            )
+
+            with self.assertRaises(ValueError) as raised:
+                ExperimentConfig.load(write_config(root, text))
+
+            message = str(raised.exception)
+            self.assertIn("official limit", message)
+            self.assertIn("official IBM evaluator", message)
+
     def test_arbitrary_rewrite_prompt_and_temperature_are_loaded(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -180,6 +198,7 @@ query = "agentic"
                 config.schedule("default").generation,
                 ("task_b", "task_c_last"),
             )
+            self.assertEqual(set(config.pipelines), {"bge_last"})
 
     def test_pipeline_output_kind_is_validated(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

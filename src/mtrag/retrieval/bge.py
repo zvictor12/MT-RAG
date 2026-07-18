@@ -1,11 +1,12 @@
 from collections.abc import Sequence
+from typing import cast
 
 from mtrag.retrieval.elasticsearch import (
     SOURCE_FIELDS,
     ElasticsearchGateway,
     index_name,
 )
-from mtrag.schemas import SearchHit, SearchQuery
+from mtrag.schemas import BgeFeatures, SearchHit, SearchQuery
 
 
 class DenseRetriever:
@@ -16,10 +17,6 @@ class DenseRetriever:
         candidate_multiplier: int = 10,
         rescore_oversample: float = 2.0,
     ) -> None:
-        if candidate_multiplier <= 0:
-            raise ValueError("candidate_multiplier must be positive")
-        if rescore_oversample < 1.0:
-            raise ValueError("rescore_oversample must be at least 1.0")
         self.gateway = gateway
         self.candidate_multiplier = candidate_multiplier
         self.rescore_oversample = rescore_oversample
@@ -32,8 +29,7 @@ class DenseRetriever:
     ) -> dict[str, list[SearchHit]]:
         searches = []
         for query in queries:
-            if query.bge is None:
-                raise ValueError(f"BGE features are missing for {query.task_id}")
+            features = cast(BgeFeatures, query.bge)
             searches.append(
                 (
                     index_name(query.domain, "dense"),
@@ -43,7 +39,7 @@ class DenseRetriever:
                         "query": {
                             "knn": {
                                 "field": "embedding",
-                                "query_vector": list(query.bge.dense),
+                                "query_vector": list(features.dense),
                                 "k": top_k,
                                 "num_candidates": max(
                                     100,
@@ -77,11 +73,10 @@ class SparseRetriever:
     ) -> dict[str, list[SearchHit]]:
         searches = []
         for query in queries:
-            if query.bge is None:
-                raise ValueError(f"BGE features are missing for {query.task_id}")
+            features = cast(BgeFeatures, query.bge)
             vector = {
                 key: value
-                for key, value in query.bge.sparse.items()
+                for key, value in features.sparse.items()
                 if value > 0
             }
             searches.append(

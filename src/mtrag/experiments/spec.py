@@ -3,106 +3,36 @@ from __future__ import annotations
 import os
 import re
 import tomllib
-from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass, fields, replace
+from collections.abc import Iterator, Mapping
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, TypeVar
-
-
-def _section(document: Mapping[str, Any], name: str) -> Mapping[str, Any]:
-    value = document.get(name, {})
-    if not isinstance(value, Mapping):
-        raise ValueError(f"TOML section [{name}] must be a table")
-    return value
-
-
-def _path(value: str, project_root: Path) -> Path:
-    expanded = Path(os.path.expandvars(value)).expanduser()
-    return expanded if expanded.is_absolute() else project_root / expanded
-
-
-def _required_string(section: Mapping[str, Any], name: str, label: str) -> str:
-    value = section.get(name)
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{label}.{name} must be a non-empty string")
-    return value.strip()
-
-
-def _string_tuple(value: Any, label: str) -> tuple[str, ...]:
-    if value is None:
-        return ()
-    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
-        raise ValueError(f"{label} must be an array of strings")
-    result = tuple(value)
-    if any(not isinstance(item, str) or not item.strip() for item in result):
-        raise ValueError(f"{label} must be an array of non-empty strings")
-    return tuple(item.strip() for item in result)
-
-
-T = TypeVar("T")
-
-
-def _record(
-    defaults: T,
-    section: Mapping[str, Any],
-    label: str,
-    *,
-    project_root: Path = Path(),
-    paths: Iterable[str] = (),
-    urls: Iterable[str] = (),
-    positive: Iterable[str] = (),
-    required_strings: Iterable[str] = (),
-) -> T:
-    """Load a flat TOML table without repeating ``section.get`` for every field."""
-    path_names, url_names = set(paths), set(urls)
-    required_names = set(required_strings)
-    values: dict[str, Any] = {}
-    for field in fields(defaults):
-        name, default = field.name, getattr(defaults, field.name)
-        value = section.get(name, default)
-        if name in required_names:
-            if not isinstance(value, str) or not value.strip():
-                raise ValueError(f"{label}.{name} must be a non-empty string")
-            values[name] = value.strip()
-        elif name in path_names:
-            values[name] = _path(str(value), project_root)
-        else:
-            values[name] = type(default)(value)
-            if name in url_names:
-                values[name] = values[name].rstrip("/")
-
-    invalid = [name for name in positive if values[name] <= 0]
-    if invalid:
-        raise ValueError(f"{label} values must be positive: {', '.join(invalid)}")
-    return replace(defaults, **values)
-
-
-def _named(
-    document: Mapping[str, Any],
-    section_name: str,
-    parser: Callable[[str, Mapping[str, Any]], T],
-) -> tuple[T, ...]:
-    section = _section(document, section_name)
-    result = []
-    for name in section:
-        if _SAFE_NAME.fullmatch(name) is None:
-            raise ValueError(f"{section_name}.{name} is not a safe identifier")
-        result.append(parser(name, _section(section, name)))
-    return tuple(result)
-
-
-def _lookup(items: Iterable[T], name: str, label: str) -> T:
-    for item in items:
-        if getattr(item, "name") == name:
-            return item
-    raise ValueError(f"unknown {label}: {name}")
+from typing import Any, cast
 
 
 _SAFE_NAME = re.compile(r"[a-z][a-z0-9_]*")
+
 PIPELINE_OUTPUTS = {
-    "bge": frozenset(("dense", "sparse", "rrf", "rrf_reranked")),
-    "elser": frozenset(("base", "reranked")),
+    "bge": {"dense", "sparse", "rrf", "rrf_reranked"},
+    "elser": {"base", "reranked"},
 }
+QUERY_KINDS = {"last_turn", "last_turn_all", "gold", "rewrite", "agentic"}
+
+
+def _path(value: str, project_root: Path) -> Path:
+    path = Path(os.path.expandvars(value)).expanduser()
+    return path if path.is_absolute() else project_root / path
+
+
+def _named_tables(
+    document: Mapping[str, Any], section: str
+) -> Iterator[tuple[str, Mapping[str, Any]]]:
+    tables = document.get(section, {})
+    if not isinstance(tables, Mapping):
+        raise ValueError(f"TOML section [{section}] must be a table")
+    for name, table in tables.items():
+        if not isinstance(table, Mapping):
+            raise ValueError(f"TOML section [{section}.{name}] must be a table")
+        yield name, table
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,11 +72,11 @@ class ModelConfig:
 class QueryConfig:
     name: str
     kind: str
-    prompt: Path | None
-    answer_prompt: Path | None
-    compose_prompt: Path | None
-    temperature: float | None
-    max_tokens: int | None
+    prompt: Path | None = None
+    answer_prompt: Path | None = None
+    compose_prompt: Path | None = None
+    temperature: float | None = None
+    max_tokens: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,11 +156,11 @@ class ExperimentConfig:
     run: RunConfig
     services: ServiceConfig
     models: ModelConfig
-    queries: tuple[QueryConfig, ...]
-    pipelines: tuple[PipelineConfig, ...]
-    generators: tuple[GeneratorConfig, ...]
-    generation_jobs: tuple[GenerationJobConfig, ...]
-    schedules: tuple[ScheduleConfig, ...]
+    queries: dict[str, QueryConfig]
+    pipelines: dict[str, PipelineConfig]
+    generators: dict[str, GeneratorConfig]
+    generation_jobs: dict[str, GenerationJobConfig]
+    schedules: dict[str, ScheduleConfig]
     retrieval: RetrievalConfig
     reranking: RerankingConfig
     evaluation: EvaluationConfig
@@ -239,99 +169,118 @@ class ExperimentConfig:
     @classmethod
     def load(cls, path: str | Path) -> "ExperimentConfig":
         config_path = Path(path).expanduser().resolve()
-        document = tomllib.loads(config_path.read_text(encoding="utf-8"))
         project_root = config_path.parent.parent
+        document = tomllib.loads(config_path.read_text(encoding="utf-8"))
+
+        sections: dict[str, dict[str, Any]] = {}
+        for name in (
+            "run", "services", "models", "retrieval", "reranking",
+            "evaluation", "thermal",
+        ):
+            table = document.get(name, {})
+            if not isinstance(table, Mapping):
+                raise ValueError(f"TOML section [{name}] must be a table")
+            sections[name] = dict(table)
+
+        run = sections["run"]
+        run_defaults = RunConfig()
+        run["output_root"] = _path(
+            str(run.get("output_root", run_defaults.output_root)), project_root
+        )
+        run["benchmark_root"] = _path(
+            str(run.get("benchmark_root", run_defaults.benchmark_root)), project_root
+        )
+
+        services = sections["services"]
+        service_defaults = ServiceConfig()
+        for name in ("elasticsearch_url", "ollama_url"):
+            services[name] = str(
+                services.get(name, getattr(service_defaults, name))
+            ).rstrip("/")
+
+        models = sections["models"]
+        model_defaults = ModelConfig()
+        for name in ("bge_path", "reranker_path"):
+            models[name] = _path(
+                str(models.get(name, getattr(model_defaults, name))), project_root
+            )
+
+        queries: dict[str, QueryConfig] = {}
+        for name, table in _named_tables(document, "queries"):
+            kind = table.get("kind", "")
+            if kind not in {"rewrite", "agentic"}:
+                queries[name] = QueryConfig(name=name, kind=str(kind))
+                continue
+            queries[name] = QueryConfig(
+                name=name,
+                kind=str(kind),
+                prompt=_path(str(table.get("prompt", "")), project_root),
+                answer_prompt=(
+                    _path(str(table.get("answer_prompt", "")), project_root)
+                    if kind == "agentic"
+                    else None
+                ),
+                compose_prompt=(
+                    _path(str(table.get("compose_prompt", "")), project_root)
+                    if kind == "agentic"
+                    else None
+                ),
+                temperature=float(table.get("temperature", 0.0)),
+                max_tokens=int(table.get("max_tokens", 128)),
+            )
+
+        pipelines = {
+            name: PipelineConfig(
+                name=name,
+                kind=str(table.get("kind", "")),
+                query=str(table.get("query", "")),
+            )
+            for name, table in _named_tables(document, "pipelines")
+        }
+        generators = {
+            name: GeneratorConfig(
+                name=name,
+                prompt=_path(str(table.get("prompt", "")), project_root),
+                temperature=float(table.get("temperature", 0.0)),
+                max_tokens=int(table.get("max_tokens", 512)),
+                context_top_k=int(table.get("context_top_k", 5)),
+            )
+            for name, table in _named_tables(document, "generators")
+        }
+        generation_jobs = {
+            name: GenerationJobConfig(
+                name=name,
+                task=str(table.get("task", "")),
+                generator=str(table.get("generator", "")),
+                contexts=str(table.get("contexts", "")),
+                evaluate=cast(bool, table.get("evaluate", True)),
+            )
+            for name, table in _named_tables(document, "generation")
+        }
+        schedules = {
+            name: ScheduleConfig(
+                name=name,
+                task_a=tuple(cast(list[str], table.get("task_a", []))),
+                generation=tuple(cast(list[str], table.get("generation", []))),
+            )
+            for name, table in _named_tables(document, "schedules")
+        }
 
         config = cls(
             path=config_path,
             project_root=project_root,
-            run=_record(
-                RunConfig(),
-                _section(document, "run"),
-                "run",
-                project_root=project_root,
-                paths=("output_root", "benchmark_root"),
-                positive=("cpu_slots",),
-            ),
-            services=_record(
-                ServiceConfig(),
-                _section(document, "services"),
-                "services",
-                urls=("elasticsearch_url", "ollama_url"),
-            ),
-            models=_record(
-                ModelConfig(),
-                _section(document, "models"),
-                "models",
-                project_root=project_root,
-                paths=("bge_path", "reranker_path"),
-                positive=(
-                    "bge_batch_size",
-                    "bge_max_length",
-                    "reranker_batch_size",
-                    "reranker_max_length",
-                    "ollama_num_ctx",
-                    "ollama_timeout",
-                ),
-            ),
-            queries=_named(
-                document,
-                "queries",
-                lambda name, table: _query_config(name, table, project_root),
-            ),
-            pipelines=_named(
-                document,
-                "pipelines",
-                _pipeline_config,
-            ),
-            generators=_named(
-                document,
-                "generators",
-                lambda name, table: _generator_config(name, table, project_root),
-            ),
-            generation_jobs=_named(
-                document,
-                "generation",
-                _generation_job_config,
-            ),
-            schedules=_named(
-                document,
-                "schedules",
-                _schedule_config,
-            ),
-            retrieval=_record(
-                RetrievalConfig(),
-                _section(document, "retrieval"),
-                "retrieval",
-                positive=(
-                    "dense_top_k",
-                    "dense_candidate_multiplier",
-                    "sparse_top_k",
-                    "elser_top_k",
-                    "rrf_top_k",
-                    "rrf_rank_constant",
-                    "prediction_top_k",
-                    "request_batch_size",
-                ),
-                required_strings=("bge_index_revision", "elser_index_revision"),
-            ),
-            reranking=_record(
-                RerankingConfig(),
-                _section(document, "reranking"),
-                "reranking",
-                positive=("input_top_k", "output_top_k", "task_batch_size"),
-            ),
-            evaluation=_record(
-                EvaluationConfig(),
-                _section(document, "evaluation"),
-                "evaluation",
-                positive=("bertscore_batch_size",),
-            ),
-            thermal=_record(
-                ThermalConfig(),
-                _section(document, "thermal"),
-                "thermal",
-            ),
+            run=RunConfig(**run),
+            services=ServiceConfig(**services),
+            models=ModelConfig(**models),
+            queries=queries,
+            pipelines=pipelines,
+            generators=generators,
+            generation_jobs=generation_jobs,
+            schedules=schedules,
+            retrieval=RetrievalConfig(**sections["retrieval"]),
+            reranking=RerankingConfig(**sections["reranking"]),
+            evaluation=EvaluationConfig(**sections["evaluation"]),
+            thermal=ThermalConfig(**sections["thermal"]),
         )
         config.validate()
         return config
@@ -341,190 +290,153 @@ class ExperimentConfig:
         return self.run.output_root / self.run.name
 
     def query(self, name: str) -> QueryConfig:
-        return _lookup(self.queries, name, "query")
+        return self.queries[name]
 
     def pipeline(self, name: str) -> PipelineConfig:
-        return _lookup(self.pipelines, name, "pipeline")
+        return self.pipelines[name]
 
     def generator(self, name: str) -> GeneratorConfig:
-        return _lookup(self.generators, name, "generator")
+        return self.generators[name]
 
     def generation_job(self, name: str) -> GenerationJobConfig:
-        return _lookup(self.generation_jobs, name, "generation job")
+        return self.generation_jobs[name]
 
     def schedule(self, name: str) -> ScheduleConfig:
-        return _lookup(self.schedules, name, "schedule")
+        return self.schedules[name]
 
     def resolve_retrieval_output(self, reference: str) -> tuple[PipelineConfig, str]:
-        pipeline_name, separator, output = reference.partition(".")
-        if not separator or "." in output:
-            raise ValueError(
-                f"retrieval output must be '<pipeline>.<output>': {reference!r}"
-            )
-        pipeline = self.pipeline(pipeline_name)
-        if output not in PIPELINE_OUTPUTS[pipeline.kind]:
-            raise ValueError(
-                f"pipeline {pipeline.name!r} ({pipeline.kind}) has no output "
-                f"{output!r}"
-            )
-        return pipeline, output
+        pipeline_name, output = reference.split(".", 1)
+        return self.pipelines[pipeline_name], output
 
     def validate(self) -> None:
-        if self.retrieval.prediction_top_k > 10:
-            raise ValueError("retrieval.prediction_top_k cannot exceed the official limit 10")
-        if self.retrieval.dense_rescore_oversample < 1.0:
-            raise ValueError("dense_rescore_oversample must be at least 1.0")
-        if self.evaluation.bertscore_model != "microsoft/deberta-xlarge-mnli":
-            raise ValueError(
+        errors: list[str] = []
+        retrieval, reranking = self.retrieval, self.reranking
+        constraints = (
+            (
+                bool(retrieval.bge_index_revision.strip()),
+                "retrieval.bge_index_revision must be a non-empty string",
+            ),
+            (
+                bool(retrieval.elser_index_revision.strip()),
+                "retrieval.elser_index_revision must be a non-empty string",
+            ),
+            (
+                1 <= retrieval.prediction_top_k <= 10,
+                "retrieval.prediction_top_k cannot exceed the official limit 10",
+            ),
+            (
+                retrieval.dense_rescore_oversample >= 1.0,
+                "dense_rescore_oversample must be at least 1.0",
+            ),
+            (
+                reranking.input_top_k <= retrieval.rrf_top_k,
+                "reranking.input_top_k cannot exceed retrieval.rrf_top_k",
+            ),
+            (
+                reranking.output_top_k <= reranking.input_top_k,
+                "reranking.output_top_k cannot exceed reranking.input_top_k",
+            ),
+            (
+                self.evaluation.bertscore_model == "microsoft/deberta-xlarge-mnli",
                 "the official IBM evaluator requires "
-                "evaluation.bertscore_model='microsoft/deberta-xlarge-mnli'"
-            )
+                "evaluation.bertscore_model='microsoft/deberta-xlarge-mnli'",
+            ),
+            (
+                self.thermal.gpu_resume < self.thermal.gpu_pause
+                and self.thermal.cpu_resume < self.thermal.cpu_pause
+                and self.thermal.poll_interval > 0
+                and self.thermal.resume_hold >= 0,
+                "thermal thresholds must resume below pause and use non-negative timing",
+            ),
+        )
+        errors.extend(message for valid, message in constraints if not valid)
 
-        for pipeline in self.pipelines:
-            self.query(pipeline.query)
-        for job in self.generation_jobs:
-            self.generator(job.generator)
+        for section, items in {
+            "queries": self.queries,
+            "pipelines": self.pipelines,
+            "generators": self.generators,
+            "generation": self.generation_jobs,
+            "schedules": self.schedules,
+        }.items():
+            for name in items:
+                if _SAFE_NAME.fullmatch(name) is None:
+                    errors.append(f"{section}.{name} is not a safe identifier")
+
+        for query in self.queries.values():
+            label = f"queries.{query.name}"
+            if query.kind not in QUERY_KINDS:
+                errors.append(f"{label}.kind is unknown: {query.kind}")
+                continue
+            if query.kind in {"rewrite", "agentic"}:
+                if query.max_tokens is None or query.max_tokens <= 0:
+                    errors.append(f"{label}.max_tokens must be positive")
+                if query.temperature is None or not 0 <= query.temperature <= 2:
+                    errors.append(f"{label}.temperature must be between 0 and 2")
+                prompts = (
+                    (query.prompt, query.answer_prompt, query.compose_prompt)
+                    if query.kind == "agentic"
+                    else (query.prompt,)
+                )
+                for prompt in prompts:
+                    if prompt is None or not prompt.is_file():
+                        errors.append(f"prompt file is missing: {prompt}")
+
+        for pipeline in self.pipelines.values():
+            label = f"pipelines.{pipeline.name}"
+            if pipeline.kind not in PIPELINE_OUTPUTS:
+                errors.append(f"{label}.kind is unknown: {pipeline.kind}")
+            if pipeline.query not in self.queries:
+                errors.append(f"unknown query: {pipeline.query}")
+
+        for generator in self.generators.values():
+            label = f"generators.{generator.name}"
+            if not generator.prompt.is_file():
+                errors.append(f"prompt file is missing: {generator.prompt}")
+            if not 0 <= generator.temperature <= 2:
+                errors.append(f"{label}.temperature must be between 0 and 2")
+            if generator.max_tokens <= 0 or not 1 <= generator.context_top_k <= 10:
+                errors.append(
+                    f"{label}: max_tokens must be positive and context_top_k must be 1..10"
+                )
+
+        retrieval_references: list[str] = []
+        for job in self.generation_jobs.values():
+            label = f"generation.{job.name}"
+            if not isinstance(job.evaluate, bool):
+                errors.append(f"{label}.evaluate must be a boolean")
+            if job.task not in {"b", "c"}:
+                errors.append(f"{label}.task must be 'b' or 'c'")
+            if (job.task == "b") != (job.contexts == "reference"):
+                errors.append(
+                    f"{label}: Task B uses 'reference'; "
+                    "Task C uses a retrieval output"
+                )
+            if job.generator not in self.generators:
+                errors.append(f"unknown generator: {job.generator}")
             if job.task == "c":
-                self.resolve_retrieval_output(job.contexts)
+                retrieval_references.append(job.contexts)
 
-        for schedule in self.schedules:
-            for reference in schedule.task_a:
-                self.resolve_retrieval_output(reference)
+        for schedule in self.schedules.values():
+            retrieval_references.extend(schedule.task_a)
             for job_name in schedule.generation:
-                self.generation_job(job_name)
+                if job_name not in self.generation_jobs:
+                    errors.append(f"unknown generation job: {job_name}")
 
-        if self.reranking.input_top_k > self.retrieval.rrf_top_k:
-            raise ValueError("reranking.input_top_k cannot exceed retrieval.rrf_top_k")
-        if self.reranking.output_top_k > self.reranking.input_top_k:
-            raise ValueError("reranking.output_top_k cannot exceed reranking.input_top_k")
+        for reference in retrieval_references:
+            pipeline_name, separator, output = reference.partition(".")
+            if not separator or "." in output:
+                errors.append(
+                    f"retrieval output must be '<pipeline>.<output>': {reference!r}"
+                )
+                continue
+            pipeline = self.pipelines.get(pipeline_name)
+            if pipeline is None:
+                errors.append(f"unknown pipeline: {pipeline_name}")
+            elif output not in PIPELINE_OUTPUTS.get(pipeline.kind, ()):
+                errors.append(
+                    f"pipeline {pipeline.name!r} ({pipeline.kind}) has no output {output!r}"
+                )
 
-
-def _query_config(
-    name: str,
-    section: Mapping[str, Any],
-    project_root: Path,
-) -> QueryConfig:
-    label = f"queries.{name}"
-    kind = _required_string(section, "kind", label)
-    if kind not in {
-        "last_turn",
-        "last_turn_all",
-        "gold",
-        "rewrite",
-        "agentic",
-    }:
-        raise ValueError(f"{label}.kind is unknown: {kind}")
-    if kind not in {"rewrite", "agentic"}:
-        return QueryConfig(name, kind, None, None, None, None, None)
-
-    prompt = _prompt(section, label, project_root)
-    answer_prompt = (
-        _prompt(section, label, project_root, field="answer_prompt")
-        if kind == "agentic"
-        else None
-    )
-    compose_prompt = (
-        _prompt(section, label, project_root, field="compose_prompt")
-        if kind == "agentic"
-        else None
-    )
-    temperature = _temperature(section.get("temperature", 0.0), label)
-    max_tokens = int(section.get("max_tokens", 128))
-    if max_tokens <= 0:
-        raise ValueError(f"{label}.max_tokens must be positive")
-    return QueryConfig(
-        name=name,
-        kind=kind,
-        prompt=prompt,
-        answer_prompt=answer_prompt,
-        compose_prompt=compose_prompt,
-        temperature=temperature,
-        max_tokens=max_tokens,
-    )
-
-
-def _pipeline_config(name: str, section: Mapping[str, Any]) -> PipelineConfig:
-    label = f"pipelines.{name}"
-    kind = _required_string(section, "kind", label)
-    if kind not in PIPELINE_OUTPUTS:
-        raise ValueError(f"{label}.kind is unknown: {kind}")
-    return PipelineConfig(
-        name=name,
-        kind=kind,
-        query=_required_string(section, "query", label),
-    )
-
-
-def _generator_config(
-    name: str,
-    section: Mapping[str, Any],
-    project_root: Path,
-) -> GeneratorConfig:
-    label = f"generators.{name}"
-    max_tokens = int(section.get("max_tokens", 512))
-    context_top_k = int(section.get("context_top_k", 5))
-    if max_tokens <= 0 or not 1 <= context_top_k <= 10:
-        raise ValueError(
-            f"{label}: max_tokens must be positive and context_top_k must be 1..10"
-        )
-    return GeneratorConfig(
-        name=name,
-        prompt=_prompt(section, label, project_root),
-        temperature=_temperature(section.get("temperature", 0.0), label),
-        max_tokens=max_tokens,
-        context_top_k=context_top_k,
-    )
-
-
-def _generation_job_config(
-    name: str,
-    section: Mapping[str, Any],
-) -> GenerationJobConfig:
-    label = f"generation.{name}"
-    evaluate = section.get("evaluate", True)
-    if not isinstance(evaluate, bool):
-        raise ValueError(f"{label}.evaluate must be a boolean")
-    task = _required_string(section, "task", label)
-    contexts = _required_string(section, "contexts", label)
-    if task not in {"b", "c"}:
-        raise ValueError(f"{label}.task must be 'b' or 'c'")
-    if (task == "b") != (contexts == "reference"):
-        raise ValueError(
-            f"{label}: Task B uses 'reference'; Task C uses a retrieval output"
-        )
-    return GenerationJobConfig(
-        name,
-        task,
-        _required_string(section, "generator", label),
-        contexts,
-        evaluate,
-    )
-
-
-def _schedule_config(name: str, section: Mapping[str, Any]) -> ScheduleConfig:
-    label = f"schedules.{name}"
-    return ScheduleConfig(
-        name,
-        _string_tuple(section.get("task_a"), f"{label}.task_a"),
-        _string_tuple(section.get("generation"), f"{label}.generation"),
-    )
-
-
-def _prompt(
-    section: Mapping[str, Any],
-    label: str,
-    project_root: Path,
-    *,
-    field: str = "prompt",
-) -> Path:
-    path = _path(_required_string(section, field, label), project_root)
-    if not path.is_file():
-        raise ValueError(f"prompt file is missing: {path}")
-    return path
-
-
-def _temperature(value: Any, label: str) -> float:
-    temperature = float(value)
-    if not 0.0 <= temperature <= 2.0:
-        raise ValueError(f"{label}.temperature must be between 0 and 2")
-    return temperature
+        errors = list(dict.fromkeys(errors))
+        if errors:
+            raise ValueError("invalid experiment config:\n- " + "\n- ".join(errors))

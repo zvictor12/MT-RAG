@@ -4,7 +4,6 @@ import unittest
 from pathlib import Path
 
 from mtrag.evaluation.writer import (
-    deterministic_rank_score,
     make_retrieval_record,
     write_retrieval_jsonl,
 )
@@ -50,10 +49,6 @@ class RetrievalWriterTest(unittest.TestCase):
                 json.loads(path.read_text(encoding="utf-8")),
                 record,
             )
-
-    def test_rank_score(self) -> None:
-        self.assertEqual(deterministic_rank_score(2), 0.5)
-
 
 if __name__ == "__main__":
     unittest.main()

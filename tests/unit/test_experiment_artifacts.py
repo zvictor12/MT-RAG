@@ -5,13 +5,16 @@ from pathlib import Path
 
 from mtrag.data.jsonl import read_jsonl, write_jsonl
 from mtrag.experiments.artifacts import (
+    CandidateStore,
     JsonlCheckpoint,
     RunArtifacts,
-    materialize_prediction,
-    ranking_record,
-    record_hits,
 )
-from mtrag.schemas import BenchmarkTask, Message, SearchHit
+from mtrag.schemas import (
+    ArtifactRef,
+    BenchmarkTask,
+    Message,
+    SearchHit,
+)
 
 
 class JsonlCheckpointTest(unittest.TestCase):
@@ -91,23 +94,32 @@ class ArtifactMappingTest(unittest.TestCase):
             text="Passage",
         )
 
-        record = ranking_record(task, [hit])
-        restored = record_hits(record)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "candidates.jsonl"
+            store = CandidateStore(path)
+            store.append_hits({task.task_id: task}, {task.task_id: (hit,)})
+            record = read_jsonl(path)[0]
+            restored = store.rankings({task.task_id: task})[task.task_id]
+            contexts = store.contexts(top_k=1)[task.task_id]
 
         self.assertEqual(record["contexts"][0]["score"], 1.0)
-        self.assertEqual(restored, [hit])
+        self.assertEqual(restored.hits, (hit,))
+        self.assertEqual(contexts[0].document_id, "doc")
+        self.assertEqual(contexts[0].score, 12.5)
 
     def test_run_artifacts_separates_named_experiment_revisions(self) -> None:
         paths = RunArtifacts(Path("run"))
+        retrieval = ArtifactRef("bge_last.dense", self.revision)
+        generation = ArtifactRef("answer", self.revision)
         self.assertEqual(
-            paths.candidates("bge_last.dense", self.revision),
+            paths.candidates(retrieval),
             Path(
                 "run/experiments/bge_last/dense/"
                 f"{self.revision}/candidates.jsonl"
             ),
         )
         self.assertEqual(
-            paths.generation("answer", self.revision),
+            paths.generation(generation),
             Path(f"run/generation/answer/{self.revision}/predictions.jsonl"),
         )
 
@@ -135,13 +147,13 @@ class ArtifactMappingTest(unittest.TestCase):
                 title="Title",
                 text="Long internal passage",
             )
-            write_jsonl(
-                candidates,
-                [ranking_record(tasks[0], [hit])],
+            store = CandidateStore(candidates)
+            store.append_hits(
+                {task.task_id: task for task in tasks},
+                {tasks[0].task_id: (hit,)},
             )
 
-            count = materialize_prediction(
-                candidates,
+            count = store.write_prediction(
                 prediction,
                 top_k=10,
                 tasks=tasks,
@@ -155,6 +167,43 @@ class ArtifactMappingTest(unittest.TestCase):
                 [{"document_id": "doc", "score": 1.0}],
             )
             self.assertEqual(records[1]["contexts"], [])
+
+    def test_reads_existing_candidate_jsonl_format(self) -> None:
+        task = BenchmarkTask(
+            task_id="q<::>1",
+            conversation_id="q",
+            turn=1,
+            collection="collection",
+            domain="clapnq",
+            messages=(Message("user", "question"),),
+        )
+        row = {
+            "conversation_id": "q",
+            "task_id": "q<::>1",
+            "turn": 1,
+            "Collection": "collection",
+            "input": [{"speaker": "user", "text": "question"}],
+            "contexts": [
+                {
+                    "document_id": "doc",
+                    "score": 1.0,
+                    "retriever_score": 12.5,
+                    "rank": 1,
+                    "source": "elser",
+                    "title": "Title",
+                    "text": "Passage",
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "candidates.jsonl"
+            write_jsonl(path, [row])
+
+            loaded = CandidateStore(path).rankings({task.task_id: task})[task.task_id]
+
+        self.assertEqual(loaded.hits[0].document_id, "doc")
+        self.assertEqual(loaded.hits[0].score, 12.5)
+        self.assertEqual(loaded.hits[0].source, "elser")
 
 
 if __name__ == "__main__":

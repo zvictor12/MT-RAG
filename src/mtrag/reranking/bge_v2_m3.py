@@ -31,7 +31,6 @@ class BgeV2M3Scorer:
         if self._model is not None:
             return self._model
 
-        import torch
         from FlagEmbedding import FlagReranker
         from FlagEmbedding.inference.reranker.encoder_only import (
             base as reranker_module,
@@ -39,11 +38,6 @@ class BgeV2M3Scorer:
 
         reranker_module.tqdm = lambda iterable, *args, **kwargs: iterable
         reranker_module.trange = lambda *args, **kwargs: range(*args)
-
-        if self.device.startswith("cuda") and not torch.cuda.is_available():
-            raise RuntimeError("CUDA is unavailable; run `make diagnose`")
-        if not self.model_path.is_dir():
-            raise RuntimeError(f"Reranker model is missing: {self.model_path}")
 
         self._model = FlagReranker(
             str(self.model_path),

@@ -77,7 +77,10 @@ class BenchmarkRepositoryTests(unittest.TestCase):
         self.assertEqual(task.targets[0].text, "Yes.")
 
     def test_loads_official_last_and_gold_variants(self) -> None:
-        last = self.repository.query_cases(QueryVariant.LAST)
+        last = self.repository.query_cases(
+            QueryVariant.LAST,
+            qwen_queries={"ignored": "generated query"},
+        )
         gold = self.repository.query_cases("gold")
 
         self.assertEqual(len(last), 4)

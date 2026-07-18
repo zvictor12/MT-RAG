@@ -6,7 +6,12 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from mtrag.experiments.artifacts import JsonlCheckpoint, RunArtifacts
-from mtrag.experiments.generation_stages import evaluate_generation_jobs
+from mtrag.experiments.generation_stages import (
+    _generation_record,
+    evaluate_generation_jobs,
+    generate_job,
+)
+from mtrag.schemas import ArtifactRef, BenchmarkTask, Context, Message
 
 
 class FakeEvaluator:
@@ -41,16 +46,15 @@ class GenerationStagesTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
-    def job(self, name: str, generation: str, evaluation: str) -> dict[str, str]:
+    def job(self, name: str, generation: str, evaluation: str) -> dict:
         return {
-            "job_name": name,
-            "generation_revision": generation,
+            "generation": ArtifactRef(name, generation),
             "evaluation_revision": evaluation,
         }
 
     def write_generation(self, name: str, revision: str, task_id: str) -> dict:
         record = {"task_id": task_id, "predictions": [{"text": "answer"}]}
-        path = self.artifacts.generation(name, revision)
+        path = self.artifacts.generation(ArtifactRef(name, revision))
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(record) + "\n", encoding="utf-8")
         return record
@@ -86,11 +90,9 @@ class GenerationStagesTest(unittest.TestCase):
         )
         self.assertEqual(FakeEvaluator.instances, 1)
         for job in (first, second):
-            summary = self.artifacts.generation_summary(
-                job["job_name"],
-                job["generation_revision"],
-                job["evaluation_revision"],
-            )
+            summary = self.artifacts.generation_evaluation(
+                job["generation"], job["evaluation_revision"]
+            ) / "ibm-summary.json"
             self.assertEqual(json.loads(summary.read_text())["task_count"], 1)
 
     @patch(
@@ -103,27 +105,101 @@ class GenerationStagesTest(unittest.TestCase):
     ) -> None:
         job = self.job("complete", "e" * 64, "f" * 64)
         record = self.write_generation("complete", "e" * 64, "q1")
+        evaluation_dir = self.artifacts.generation_evaluation(
+            job["generation"], job["evaluation_revision"]
+        )
         checkpoint = JsonlCheckpoint(
-            self.artifacts.generation_metrics(
-                "complete",
-                "e" * 64,
-                "f" * 64,
-            )
+            evaluation_dir / "ibm-metrics.jsonl"
         )
         checkpoint.append(dict(record, metrics={"RB_agg": [0.7]}))
 
         evaluate_generation_jobs(self.config, self.artifacts, jobs=(job,))
 
         scorer_type.assert_not_called()
-        summary = self.artifacts.generation_summary(
-            "complete",
-            "e" * 64,
-            "f" * 64,
-        )
+        summary = evaluation_dir / "ibm-summary.json"
         self.assertEqual(
             json.loads(summary.read_text())["metrics"]["RB_agg"]["mean"],
             0.7,
         )
+
+    @patch("mtrag.experiments.generation_stages.BenchmarkRepository")
+    def test_task_c_rejects_missing_retrieval_contexts(
+        self,
+        repository_type,
+    ) -> None:
+        task = BenchmarkTask(
+            task_id="q<::>1",
+            conversation_id="q",
+            turn=1,
+            collection="collection",
+            domain="cloud",
+            messages=(Message("user", "question"),),
+        )
+        repository_type.return_value.load_tasks.return_value = [task]
+        config = SimpleNamespace(
+            run=SimpleNamespace(benchmark_root=Path("benchmark")),
+            generation_job=lambda _name: SimpleNamespace(
+                task="c",
+                generator="qwen",
+            ),
+            generator=lambda _name: SimpleNamespace(context_top_k=5),
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "retrieval contexts are incomplete: 0/1 tasks",
+        ):
+            generate_job(
+                config,
+                self.artifacts,
+                generation=ArtifactRef("task_c", "a" * 64),
+                context=ArtifactRef("elser.base", "b" * 64),
+            )
+
+    def test_generation_record_keeps_official_json_shape(self) -> None:
+        task = BenchmarkTask(
+            task_id="q<::>1",
+            conversation_id="q",
+            turn=1,
+            collection="collection",
+            domain="cloud",
+            messages=(Message("user", "question"),),
+            targets=(Message("agent", "target"),),
+            answerability=("answerable",),
+        )
+        context = Context(
+            document_id="doc",
+            text="passage",
+            title="Title",
+            url="https://example.test",
+            score=12.5,
+        )
+
+        record = _generation_record(
+            task,
+            [context],
+            "answer",
+            {"job": "task_c"},
+        )
+
+        self.assertEqual(record["task_id"], task.task_id)
+        self.assertEqual(record["targets"], [{"speaker": "agent", "text": "target"}])
+        self.assertEqual(record["Answerability"], ["answerable"])
+        self.assertEqual(
+            record["contexts"],
+            [
+                {
+                    "document_id": "doc",
+                    "text": "passage",
+                    "score": 1.0,
+                    "retriever_score": 12.5,
+                    "title": "Title",
+                    "url": "https://example.test",
+                }
+            ],
+        )
+        self.assertEqual(record["predictions"], [{"text": "answer"}])
+        self.assertEqual(record["pipeline"], {"job": "task_c"})
 
 
 if __name__ == "__main__":

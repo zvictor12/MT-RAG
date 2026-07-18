@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass
 
-from mtrag.config import settings
 from mtrag.experiments.spec import ExperimentConfig
 from mtrag.llm import OllamaClient
 from mtrag.runtime import ThermalGuard, ThermalThresholds
@@ -24,21 +23,24 @@ def thermal_guard(config: ExperimentConfig) -> ThermalGuard:
 
 
 def ollama_client(config: ExperimentConfig) -> OllamaClient:
-    client_settings = replace(
-        settings,
-        ollama_url=config.services.ollama_url,
-        ollama_model=config.models.ollama_model,
-        ollama_num_ctx=config.models.ollama_num_ctx,
-        ollama_keep_alive=config.models.ollama_keep_alive,
-        ollama_seed=config.models.ollama_seed,
-        ollama_timeout=config.models.ollama_timeout,
+    model = config.models
+    return OllamaClient(
+        url=config.services.ollama_url,
+        model=model.ollama_model,
+        num_ctx=model.ollama_num_ctx,
+        seed=model.ollama_seed,
+        keep_alive=model.ollama_keep_alive,
+        timeout=model.ollama_timeout,
     )
-    return OllamaClient(client_settings)
 
 
-def ollama_model_info(
-    config: ExperimentConfig,
-) -> tuple[str, dict[str, str | int]]:
+@dataclass(frozen=True, slots=True)
+class OllamaModelInfo:
+    identity: str
+    provenance: dict[str, str | int]
+
+
+def ollama_model_info(config: ExperimentConfig) -> OllamaModelInfo:
     model = config.models
     identity = (
         f"{model.ollama_model}@{model.ollama_digest}:"
@@ -50,12 +52,7 @@ def ollama_model_info(
         "num_ctx": model.ollama_num_ctx,
         "seed": model.ollama_seed,
     }
-    return identity, provenance
-
-
-def chunks[T](values: list[T], size: int):
-    for start in range(0, len(values), size):
-        yield values[start : start + size]
+    return OllamaModelInfo(identity, provenance)
 
 
 def progress(label: str, completed: int, total: int) -> None:

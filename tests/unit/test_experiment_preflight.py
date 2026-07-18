@@ -5,9 +5,10 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from mtrag.experiments.preflight import (
-    _check_elser_endpoint,
-    _require_files,
-    _validate_bge_mapping,
+    PreflightError,
+    _elser_ready,
+    _mapping_issue,
+    preflight,
     requirements_for,
 )
 
@@ -23,19 +24,12 @@ class ExperimentPreflightTest(unittest.TestCase):
             )
         )
 
-        self.assertFalse(_check_elser_endpoint(config))
+        self.assertFalse(_elser_ready(config))
         post.assert_called_once_with(
             "http://localhost:9200/_inference/sparse_embedding/mtrag-elser",
             json={"input": "preflight query"},
             timeout=120,
         )
-
-    def test_requires_every_pinned_model_file(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "config.json").touch()
-            with self.assertRaisesRegex(RuntimeError, "model.bin"):
-                _require_files("model", root, ("config.json", "model.bin"))
 
     def test_dense_mapping_must_match_the_downloaded_query_encoder(self) -> None:
         index = "mtrag-cloud-bge-m3-dense"
@@ -53,11 +47,10 @@ class ExperimentPreflightTest(unittest.TestCase):
                 }
             }
         }
-        _validate_bge_mapping(index, mapping)
+        self.assertIsNone(_mapping_issue(index, mapping))
 
         mapping[index]["mappings"]["properties"]["embedding"]["dims"] = 768
-        with self.assertRaisesRegex(RuntimeError, "incompatible mapping"):
-            _validate_bge_mapping(index, mapping)
+        self.assertIn("incompatible mapping", _mapping_issue(index, mapping) or "")
 
     def test_requirements_are_derived_from_the_selected_schedule(self) -> None:
         bge = requirements_for(
@@ -75,17 +68,39 @@ class ExperimentPreflightTest(unittest.TestCase):
             )
         )
 
-        self.assertTrue(bge.bge_model)
         self.assertTrue(bge.cuda)
         self.assertEqual(bge.bge_modes, {"dense"})
         self.assertFalse(bge.elser)
-        self.assertFalse(bge.reranker)
         self.assertFalse(bge.ollama)
 
         self.assertTrue(elser.elser)
-        self.assertFalse(elser.bge_model)
         self.assertFalse(elser.bge_modes)
         self.assertFalse(elser.cuda)
+
+    @patch("mtrag.experiments.preflight.ollama_client")
+    def test_public_boundary_aggregates_reproducibility_errors(
+        self,
+        client_factory: Mock,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = SimpleNamespace(
+                run=SimpleNamespace(benchmark_root=Path(directory)),
+                models=SimpleNamespace(
+                    ollama_model="qwen",
+                    ollama_digest="expected-digest",
+                ),
+            )
+            client_factory.return_value.installed_model_digests.return_value = {
+                "qwen": "different-digest"
+            }
+            stage = SimpleNamespace(kind="rewrite", params={})
+
+            with self.assertRaises(PreflightError) as failure:
+                preflight(config, stages=(stage,))
+
+            message = str(failure.exception)
+            self.assertIn("benchmark is missing", message)
+            self.assertIn("Ollama digest changed", message)
 
 
 if __name__ == "__main__":

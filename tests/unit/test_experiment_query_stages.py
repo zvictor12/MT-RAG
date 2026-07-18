@@ -4,10 +4,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from mtrag.experiments.artifacts import RunArtifacts, read_jsonl
+from mtrag.data.jsonl import read_jsonl
+from mtrag.experiments.artifacts import RunArtifacts
 from mtrag.experiments.query_stages import rewrite_query
 from mtrag.llm import AgenticRewrite
-from mtrag.schemas import BenchmarkTask, Message
+from mtrag.schemas import ArtifactRef, BenchmarkTask, Message
 
 
 COLLECTION = "mt-rag-clapnq-elser-512-100-20240503"
@@ -62,6 +63,7 @@ class RewriteStageTest(unittest.TestCase):
             rewriter.rewrite.return_value = "Which company operates Cloudant?"
             client = MagicMock()
             revision = "a" * 64
+            artifact = ArtifactRef("qwen_alt", revision)
 
             with (
                 patch(
@@ -81,11 +83,10 @@ class RewriteStageTest(unittest.TestCase):
                 rewrite_query(
                     config,
                     artifacts,
-                    query_name="qwen_alt",
-                    query_revision=revision,
+                    query=artifact,
                 )
 
-            records = read_jsonl(artifacts.rewrite("qwen_alt", revision))
+            records = read_jsonl(artifacts.rewrite(artifact))
 
         self.assertEqual(records[0]["query"], "What is Cloudant?")
         self.assertEqual(records[0]["rewrite_method"], "identity")
@@ -145,6 +146,7 @@ class RewriteStageTest(unittest.TestCase):
                 "QUERY: Which company operates Cloudant?",
             )
             client = MagicMock()
+            artifact = ArtifactRef("agentic", "b" * 64)
 
             with (
                 patch(
@@ -164,13 +166,10 @@ class RewriteStageTest(unittest.TestCase):
                 rewrite_query(
                     config,
                     artifacts,
-                    query_name="agentic",
-                    query_revision="b" * 64,
+                    query=artifact,
                 )
 
-            records = read_jsonl(
-                artifacts.rewrite("agentic", "b" * 64)
-            )
+            records = read_jsonl(artifacts.rewrite(artifact))
 
         self.assertEqual(records[0]["rewrite_method"], "identity")
         self.assertNotIn("clarification_questions", records[0])

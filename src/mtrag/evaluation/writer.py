@@ -12,11 +12,6 @@ from mtrag.data.jsonl import write_jsonl
 MAX_OFFICIAL_CONTEXTS = 10
 
 
-def deterministic_rank_score(rank: int) -> float:
-    """Return a unique score that preserves an already-decided rank."""
-    return 1.0 / rank
-
-
 def make_retrieval_record(
     base_record: Mapping[str, Any],
     contexts: Sequence[Mapping[str, Any]],
@@ -37,9 +32,7 @@ def make_retrieval_record(
             continue
 
         output_context = dict(context)
-        output_context["score"] = deterministic_rank_score(
-            len(official_contexts) + 1
-        )
+        output_context["score"] = 1.0 / (len(official_contexts) + 1)
         official_contexts.append(output_context)
         seen.add(document_id)
         if len(official_contexts) == max_contexts:

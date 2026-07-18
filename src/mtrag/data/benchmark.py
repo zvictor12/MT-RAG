@@ -92,19 +92,10 @@ class BenchmarkRepository:
         qwen_queries: Mapping[str, str] | str | PathLike[str] | None = None,
     ) -> tuple[QueryCase, ...]:
         selected = QueryVariant(variant)
-        generated_variants = {
-            QueryVariant.QWEN,
-            QueryVariant.QWEN_T0,
-            QueryVariant.QWEN_T02,
-        }
-        if selected in generated_variants:
+        if selected is QueryVariant.QWEN:
             if qwen_queries is None:
-                raise ValueError(
-                    f"qwen_queries is required for the {selected.value} variant"
-                )
-            return self._qwen_query_cases(qwen_queries, selected)
-        if qwen_queries is not None:
-            raise ValueError("qwen_queries is only valid for generated variants")
+                raise ValueError("qwen_queries is required for the qwen variant")
+            return self._qwen_query_cases(qwen_queries)
 
         suffix = {
             QueryVariant.LAST: "lastturn",
@@ -131,7 +122,7 @@ class BenchmarkRepository:
                 task_id=task.task_id,
                 domain=task.domain,
                 variant=QueryVariant.LAST,
-                text=clean_query_text(_final_user_question(task)),
+                text=clean_query_text(task.final_question),
             )
             for task in self.load_tasks()
         )
@@ -139,7 +130,6 @@ class BenchmarkRepository:
     def _qwen_query_cases(
         self,
         source: Mapping[str, str] | str | PathLike[str],
-        variant: QueryVariant = QueryVariant.QWEN,
     ) -> tuple[QueryCase, ...]:
         queries = self._read_qwen_queries(source)
         tasks = self.tasks_by_id()
@@ -152,7 +142,7 @@ class BenchmarkRepository:
             QueryCase(
                 task_id=task.task_id,
                 domain=task.domain,
-                variant=variant,
+                variant=QueryVariant.QWEN,
                 text=clean_query_text(queries[task.task_id]),
             )
             for task in tasks.values()
@@ -215,14 +205,6 @@ def _parse_message(row: Mapping[str, Any]) -> Message:
     return Message(
         speaker=_required_str(row, "speaker"),
         text=_required_str(row, "text"),
-    )
-
-
-def _final_user_question(task: BenchmarkTask) -> str:
-    return next(
-        message.text
-        for message in reversed(task.messages)
-        if message.speaker == "user"
     )
 
 
