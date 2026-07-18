@@ -9,7 +9,7 @@ EXPERIMENT_SCHEDULE ?= bge
 RUN_DIR ?=
 RUN_DIR_ARG = $(if $(strip $(RUN_DIR)),--run-dir "$(RUN_DIR)",)
 
-.PHONY: sync sync-ml sync-evaluation sync-experiment es-up es-down es-logs es-setup elser-setup bge-restore models-bge models-reranker models ollama-enable ollama-pull ollama-unload experiment-plan experiment-preflight experiment-run experiment-status experiment-results test
+.PHONY: sync sync-ml sync-evaluation sync-experiment es-up es-down es-logs es-setup elser-setup bge-restore models-bge models-reranker models ollama-enable ollama-pull ollama-unload experiment-plan experiment-preflight experiment-run experiment-status experiment-results
 
 sync:
 	uv sync
@@ -71,6 +71,3 @@ experiment-status:
 
 experiment-results:
 	uv run --extra ml --extra evaluation python scripts/run_experiment.py results --config "$(EXPERIMENT_CONFIG)" $(RUN_DIR_ARG)
-
-test:
-	uv run python -m unittest discover -s tests/unit -v

@@ -1,0 +1,37 @@
+{
+  "task_count": 842,
+  "metrics": {
+    "BertKPrec": {
+      "mean": 0.15110916681158612,
+      "task_count": 842
+    },
+    "BertscoreP": {
+      "mean": 0.22350960407937565,
+      "task_count": 842
+    },
+    "BertscoreR": {
+      "mean": 0.20767812715377934,
+      "task_count": 842
+    },
+    "Extractiveness_RougeL": {
+      "mean": 0.13044382312992078,
+      "task_count": 842
+    },
+    "Length": {
+      "mean": 439.7814726840855,
+      "task_count": 842
+    },
+    "RB_agg": {
+      "mean": 0.3698965593566416,
+      "task_count": 842
+    },
+    "Recall": {
+      "mean": 0.3209699464193746,
+      "task_count": 842
+    },
+    "RougeL_stemFalse": {
+      "mean": 0.22439901996128642,
+      "task_count": 842
+    }
+  }
+}

@@ -1,3 +1,0 @@
-
-[2026-07-17T01:23:28.643474+00:00] $ /home/victor/dev/GitHub/mt-rag/.venv/bin/python3 /home/victor/dev/GitHub/mt-rag/scripts/run_experiment.py stage evaluate_bge_rerank --config /home/victor/dev/GitHub/mt-rag/configs/experiment.toml --run-dir /home/victor/dev/GitHub/mt-rag/runs/main
-bge_rrf_qwen_reranked: nDCG@5=0.3773, Recall@5=0.4095

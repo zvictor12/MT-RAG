@@ -1,0 +1,2 @@
+runs/main/**/*.jsonl filter=lfs diff=lfs merge=lfs -text
+runs/main/**/*.npz filter=lfs diff=lfs merge=lfs -text
