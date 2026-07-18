@@ -167,12 +167,13 @@ def _check_elasticsearch(
 
 def _check_elser_endpoint(config: ExperimentConfig) -> bool:
     try:
-        response = requests.get(
+        response = requests.post(
             (
                 f"{config.services.elasticsearch_url}/_inference/sparse_embedding/"
                 f"{config.services.elser_inference_id}"
             ),
-            timeout=10,
+            json={"input": "preflight query"},
+            timeout=120,
         )
     except requests.RequestException:
         return False
@@ -185,7 +186,7 @@ def _check_cuda() -> str:
     except ImportError as error:
         raise RuntimeError("PyTorch is missing; run `make sync-ml`") from error
     if not torch.cuda.is_available():
-        raise RuntimeError("PyTorch cannot use CUDA; run `make diagnose`")
+        raise RuntimeError("PyTorch cannot use CUDA")
     return torch.cuda.get_device_name(0)
 
 
@@ -227,7 +228,7 @@ def preflight(
     if required.elser and not _check_elser_endpoint(config):
         raise RuntimeError(
             f"ELSER inference endpoint {config.services.elser_inference_id!r} "
-            "is not ready"
+            "is not ready; unload Ollama and run scripts/setup_elasticsearch.py"
         )
     if required.elser:
         ready.append(f"ELSER index {config.retrieval.elser_index_revision}")

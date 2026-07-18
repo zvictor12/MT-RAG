@@ -84,6 +84,14 @@ class BenchmarkRepositoryTests(unittest.TestCase):
         self.assertEqual(last[0].text, "last question")
         self.assertEqual(gold[0].text, "standalone question")
 
+    def test_all_task_last_queries_come_from_generation_turns(self) -> None:
+        cases = self.repository.all_task_last_query_cases()
+
+        self.assertEqual(len(cases), 1)
+        self.assertEqual(cases[0].task_id, "conversation<::>2")
+        self.assertEqual(cases[0].domain, "clapnq")
+        self.assertEqual(cases[0].text, "Can it store JSON?")
+
     def test_qwen_queries_are_external_and_legacy_ids_are_normalized(self) -> None:
         cases = self.repository.query_cases(
             QueryVariant.QWEN,

@@ -61,6 +61,13 @@ def generate_job(
             context_revision,
             generator_config.context_top_k,
         )
+        missing = [task.task_id for task in tasks if not contexts.get(task.task_id)]
+        if missing:
+            raise RuntimeError(
+                f"retrieval contexts are incomplete: "
+                f"{len(tasks) - len(missing)}/{len(tasks)} tasks; "
+                f"first missing task: {missing[0]}"
+            )
 
     client = ollama_client(config)
     prompt = PromptTemplate.from_file(generator_config.prompt)

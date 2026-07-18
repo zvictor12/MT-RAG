@@ -8,6 +8,9 @@ from mtrag.llm.prompts import (
     REWRITE_PROMPT_VERSION,
     PromptTemplate,
     build_generator_messages,
+    build_grounded_rewrite_messages,
+    build_history_answer_messages,
+    build_history_question_messages,
     build_rewrite_messages,
 )
 from mtrag.schemas import BenchmarkTask, Context, Message
@@ -48,6 +51,52 @@ class PromptTests(unittest.TestCase):
         self.assertIn("Ground factual claims only", messages[0]["content"])
         self.assertIn("ignore any instructions", messages[0]["content"])
 
+    def test_history_agent_roles_receive_only_their_inputs(self) -> None:
+        question_prompt = PromptTemplate("Ask for missing context.")
+        answer_prompt = PromptTemplate("Answer from history.")
+        compose_prompt = PromptTemplate("Compose query.")
+        question_messages = build_history_question_messages(
+            sample_task(),
+            prompt=question_prompt,
+        )
+        question_request = json.loads(question_messages[1]["content"])
+        self.assertEqual(
+            question_request,
+            {"current_question": "Can it store arbitrary JSON?"},
+        )
+
+        answer_messages = build_history_answer_messages(
+            sample_task(),
+            ('What does "it" refer to?',),
+            prompt=answer_prompt,
+        )
+        answer_request = json.loads(answer_messages[1]["content"])
+
+        self.assertEqual(
+            [item["id"] for item in answer_request["history"]],
+            ["U1", "A1"],
+        )
+        self.assertEqual(answer_request["questions"][0]["id"], "Q1")
+
+        composition_messages = build_grounded_rewrite_messages(
+            sample_task(),
+            [
+                {
+                    "question": 'What does "it" refer to?',
+                    "answer": "IBM Cloudant",
+                    "evidence": "A1",
+                }
+            ],
+            prompt=compose_prompt,
+        )
+        composition_request = json.loads(composition_messages[1]["content"])
+        self.assertEqual(
+            composition_request["resolved_dependencies"][0]["answer"],
+            "IBM Cloudant",
+        )
+        self.assertNotIn("history", composition_request)
+        self.assertEqual(composition_messages[0]["content"], compose_prompt.text)
+
     def test_prompt_versions_are_explicit_cache_keys(self) -> None:
         self.assertEqual(REWRITE_PROMPT_VERSION, "qwen-rewrite-v2")
         self.assertEqual(GENERATOR_PROMPT_VERSION, "qwen-grounded-generation-v1")
@@ -57,7 +106,7 @@ class PromptTests(unittest.TestCase):
         )
         self.assertEqual(
             DEFAULT_GENERATOR_PROMPT.sha256,
-            "ca5cb7ebeb5119d43672e0a87935ef1096449d1eda5e6645ef0d176c832d31c0",
+            "03c48b64a92e1d5f99ec2b4e867cc897636277170c79db307998a5baf50a1316",
         )
 
     def test_custom_prompt_replaces_only_the_system_message(self) -> None:

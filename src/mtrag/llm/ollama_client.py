@@ -20,7 +20,7 @@ def _session() -> requests.Session:
                 status=3,
                 backoff_factor=1,
                 allowed_methods={"GET", "POST"},
-                status_forcelist=(429, 502, 503, 504),
+                status_forcelist=(429, 500, 502, 503, 504),
             )
         ),
     )

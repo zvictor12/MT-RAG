@@ -25,11 +25,22 @@ ollama_digest = "qwen-rev"
 [queries.last]
 kind = "last_turn"
 
+[queries.last_all]
+kind = "last_turn_all"
+
 [queries.qwen]
 kind = "rewrite"
 prompt = "prompts/rewrite.txt"
 temperature = {temperature}
 max_tokens = 128
+
+[queries.agentic]
+kind = "agentic"
+prompt = "prompts/question.txt"
+answer_prompt = "prompts/answer.txt"
+compose_prompt = "prompts/compose.txt"
+temperature = 0.0
+max_tokens = 192
 
 [pipelines.bge_last]
 kind = "bge"
@@ -42,6 +53,14 @@ query = "qwen"
 [pipelines.elser_last]
 kind = "elser"
 query = "last"
+
+[pipelines.elser_last_all]
+kind = "elser"
+query = "last_all"
+
+[pipelines.elser_agentic]
+kind = "elser"
+query = "agentic"
 
 [generators.qwen]
 prompt = "prompts/generate.txt"
@@ -61,6 +80,14 @@ generation = ["answer"]
 
 [schedules.elser]
 task_a = ["elser_last.base"]
+generation = []
+
+[schedules.last_all]
+task_a = ["elser_last_all.base"]
+generation = []
+
+[schedules.agentic]
+task_a = ["elser_agentic.reranked"]
 generation = []
 
 [retrieval]
@@ -84,6 +111,9 @@ def fixture(root: Path, temperature: float = 0.2) -> ExperimentConfig:
     config_path.parent.mkdir(parents=True, exist_ok=True)
     (root / "prompts").mkdir(exist_ok=True)
     (root / "prompts/rewrite.txt").write_text("rewrite")
+    (root / "prompts/question.txt").write_text("question")
+    (root / "prompts/answer.txt").write_text("answer")
+    (root / "prompts/compose.txt").write_text("compose")
     (root / "prompts/generate.txt").write_text("generate")
     benchmark = root / "benchmark"
     generation = benchmark / "mtrag-human/generation_tasks/reference.jsonl"
@@ -113,7 +143,32 @@ def output_revision(workflow, reference: str) -> str:
     )
 
 
+def rewrite_fingerprint(workflow, query_name: str) -> str:
+    return next(
+        stage.fingerprint
+        for stage in workflow.stages
+        if stage.kind == "rewrite" and stage.params["query_name"] == query_name
+    )
+
+
 class ExperimentPlanTest(unittest.TestCase):
+    def test_agentic_schedule_resolves_then_uses_elser_and_reranker(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workflow = build_workflow(
+                fixture(Path(directory)),
+                schedule="agentic",
+            )
+
+        self.assertEqual(
+            [stage.kind for stage in workflow.stages],
+            ["rewrite", "retrieve", "rerank", "evaluate_task_a"],
+        )
+        self.assertEqual(workflow.stages[1].params["method"], "elser")
+        self.assertEqual(
+            workflow.stages[2].params["source_reference"],
+            "elser_agentic.base",
+        )
+
     def test_schedule_is_the_only_source_of_targets(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -149,6 +204,18 @@ class ExperimentPlanTest(unittest.TestCase):
             ["answer"],
         )
 
+    def test_ollama_stages_retry_once(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workflow = build_workflow(fixture(Path(directory)), schedule="bge")
+
+        ollama_stages = [
+            stage
+            for stage in workflow.stages
+            if stage.kind in {"rewrite", "generate"}
+        ]
+        self.assertTrue(ollama_stages)
+        self.assertTrue(all(stage.max_attempts == 2 for stage in ollama_stages))
+
     def test_preflight_is_not_a_cached_stage(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             workflow = build_workflow(fixture(Path(directory)), schedule="bge")
@@ -170,20 +237,64 @@ class ExperimentPlanTest(unittest.TestCase):
             output_revision(second, "bge_qwen.dense"),
         )
 
+    def test_each_agent_prompt_versions_only_agentic_results(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = fixture(root)
+            baseline_agent = build_workflow(config, schedule="agentic")
+            baseline_bge = build_workflow(config, schedule="bge")
+            originals = {
+                path: path.read_text()
+                for path in (
+                    root / "prompts/question.txt",
+                    root / "prompts/answer.txt",
+                    root / "prompts/compose.txt",
+                )
+            }
+
+            for changed_path in originals:
+                for path, content in originals.items():
+                    path.write_text(content)
+                changed_path.write_text(originals[changed_path] + " changed")
+                changed_config = ExperimentConfig.load(
+                    root / "configs/experiment.toml"
+                )
+                changed_agent = build_workflow(
+                    changed_config,
+                    schedule="agentic",
+                )
+                changed_bge = build_workflow(changed_config, schedule="bge")
+
+                with self.subTest(prompt=changed_path.name):
+                    self.assertNotEqual(
+                        rewrite_fingerprint(baseline_agent, "agentic"),
+                        rewrite_fingerprint(changed_agent, "agentic"),
+                    )
+                    self.assertEqual(
+                        rewrite_fingerprint(baseline_bge, "qwen"),
+                        rewrite_fingerprint(changed_bge, "qwen"),
+                    )
+
     def test_task_source_changes_only_task_consumers(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             config = fixture(root)
             first = build_workflow(config, schedule="bge")
+            all_first = build_workflow(config, schedule="last_all")
             generation_tasks = (
                 root / "benchmark/mtrag-human/generation_tasks/reference.jsonl"
             )
             generation_tasks.write_text('{"changed": true}\n')
             second = build_workflow(config, schedule="bge")
+            all_second = build_workflow(config, schedule="last_all")
 
         self.assertEqual(
             output_revision(first, "bge_last.dense"),
             output_revision(second, "bge_last.dense"),
+        )
+        self.assertNotEqual(
+            output_revision(all_first, "elser_last_all.base"),
+            output_revision(all_second, "elser_last_all.base"),
         )
         self.assertNotEqual(
             next(

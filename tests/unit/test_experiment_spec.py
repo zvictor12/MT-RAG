@@ -130,6 +130,38 @@ query = "experimental"
                 "experimental",
             )
 
+    def test_agentic_query_loads_three_prompts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            text = (
+                MINIMAL_CONFIG
+                + """
+
+[queries.agentic]
+kind = "agentic"
+prompt = "prompts/question.txt"
+answer_prompt = "prompts/answer.txt"
+compose_prompt = "prompts/compose.txt"
+temperature = 0.0
+max_tokens = 192
+
+[pipelines.elser_agentic]
+kind = "elser"
+query = "agentic"
+"""
+            )
+            path = write_config(root, text)
+            (root / "prompts/question.txt").write_text("Ask questions.\n")
+            (root / "prompts/answer.txt").write_text("Answer from history.\n")
+            (root / "prompts/compose.txt").write_text("Compose query.\n")
+
+            query = ExperimentConfig.load(path).query("agentic")
+
+            self.assertEqual(query.kind, "agentic")
+            self.assertEqual(query.prompt, root / "prompts/question.txt")
+            self.assertEqual(query.answer_prompt, root / "prompts/answer.txt")
+            self.assertEqual(query.compose_prompt, root / "prompts/compose.txt")
+
     def test_jobs_and_schedules_reference_named_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             config = ExperimentConfig.load(write_config(Path(directory)))

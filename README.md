@@ -14,7 +14,6 @@ Python pipeline -> Ollama + Qwen (host, NVIDIA GPU)
 ```bash
 cp .env.example .env
 uv sync
-make diagnose
 ```
 
 Проект использует Python 3.12. Базовое окружение не устанавливает Torch и
@@ -47,22 +46,12 @@ make models           # обе модели
 по очереди: совместная резидентность BGE/reranker с Ollama не входит в бюджет
 RTX 3060 6 ГБ.
 
-Начальные настройки smoke-скриптов рассчитаны на короткие benchmark-запросы:
-
-```dotenv
-BGE_BATCH_SIZE=32
-BGE_MAX_LENGTH=512
-RERANKER_BATCH_SIZE=8
-RERANKER_MAX_LENGTH=512
-```
-
-Полный DAG берёт те же значения из секции `[models]` файла
-`configs/experiment.toml`, а не из `.env`.
+Параметры моделей задаются в секции `[models]` файла
+`configs/experiment.toml`.
 
 Если длинные запросы дают CUDA OOM, сначала уменьшите BGE batch до `16`, а
 reranker batch до `4` (при необходимости до `8`/`2`); `max_length=512`
-оставьте неизменным для сопоставимости прогонов. Меняйте `.env` для smoke и
-`[models]` для эксперимента. BGE выдаёт за один проход нормализованный
+оставьте неизменным для сопоставимости прогонов. BGE выдаёт за один проход нормализованный
 dense-вектор размерности 1024 и sparse-веса по ID токенов. Это в точности тот
 формат и tokenizer, которыми построены восстановленные Elasticsearch-индексы.
 
@@ -84,7 +73,6 @@ Toolkit:
 ```bash
 sudo systemctl enable --now ollama
 make ollama-pull
-make ollama-smoke
 ```
 
 Модель `qwen3.5:4b-q4_K_M` занимает 3.4 ГБ. Контекст ограничен до 8192,
@@ -104,7 +92,6 @@ make ollama-unload
 
 ```bash
 make es-up
-make infra-check
 ```
 
 Обычный `es-up` не включает trial. Elasticsearch доступен только локально на
@@ -152,19 +139,8 @@ make elser-setup
 ## 6. Проверка
 
 ```bash
-make infra-check
-make smoke-prompts
-make ollama-unload
-make smoke-models
 make test
-# только после make elser-setup:
-make smoke-search
 ```
-
-`infra-check` показывает GPU, версии сервисов, тип лицензии, наличие Ollama
-модели и все восстановленные `mtrag-*` индексы. `smoke-models` последовательно
-проверяет BGE dense/sparse retrieval и reranker, освобождая модель после каждого
-процесса. Ollama перед этой проверкой выгружается явно.
 
 ## 7. Эксперимент
 
@@ -210,9 +186,19 @@ Task B/C не стартуют автоматически вслед за retrie
 
 ```bash
 make experiment-run EXPERIMENT_SCHEDULE=task_b
-make experiment-run EXPERIMENT_SCHEDULE=bge_task_c
+make experiment-run EXPERIMENT_SCHEDULE=task_c_bge_last_rrf_reranked
 # после восстановления ELSER:
-make experiment-run EXPERIMENT_SCHEDULE=elser_task_c
+make experiment-run EXPERIMENT_SCHEDULE=task_c_elser_last_reranked
+```
+
+Трёхролевой history agent отдельно формулирует уточнения, отвечает на них по
+пронумерованным репликам и собирает standalone query. Первый turn остаётся
+identity. Его ELSER-вариант сразу включает reranker; Task A и полный Task C
+запускаются отдельными очередями:
+
+```bash
+make experiment-run EXPERIMENT_SCHEDULE=elser_agentic_reranked
+make experiment-run EXPERIMENT_SCHEDULE=task_c_elser_agentic_reranked
 ```
 
 После восстановления ELSER продолжите тот же campaign directory:
@@ -242,26 +228,6 @@ Fingerprint применяется локально как адрес конкр
 Поля `retrieval.bge_index_revision` и `retrieval.elser_index_revision` — явные
 версии содержимого Elasticsearch; меняйте соответствующее значение после
 замены восстановленного индекса.
-
-Для старого плоского `runs/main` есть однократный импорт. По умолчанию команда
-только показывает инвентарь и ничего не помечает завершённым:
-
-```bash
-make experiment-import-legacy RUN_DIR=runs/main EXPERIMENT_SCHEDULE=bge
-```
-
-Если старые файлы точно созданы теми же prompt, моделями и параметрами, их можно
-скопировать в текущие content-addressed ревизии явным opt-in. Перед completion
-marker импорт один раз проверяет полный набор `task_id` и обязательные поля.
-Существующую ревизию с другим содержимым он не перезаписывает:
-
-```bash
-make experiment-import-legacy RUN_DIR=runs/main EXPERIMENT_SCHEDULE=bge \
-  LEGACY_IMPORT_FLAGS=--trust-current-definition
-```
-
-Hardlink не используется: старый файл и новая ревизия не могут случайно изменить
-друг друга. Task A метрики намеренно пересчитываются официальным IBM evaluator.
 
 Scheduler допускает только одну GPU-стадию, но параллелит независимую CPU/ES
 работу в пределах `run.cpu_slots`. На границах стадий и model batches действует

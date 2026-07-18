@@ -143,6 +143,8 @@ class QueryConfig:
     name: str
     kind: str
     prompt: Path | None
+    answer_prompt: Path | None
+    compose_prompt: Path | None
     temperature: float | None
     max_tokens: int | None
 
@@ -404,12 +406,28 @@ def _query_config(
 ) -> QueryConfig:
     label = f"queries.{name}"
     kind = _required_string(section, "kind", label)
-    if kind not in {"last_turn", "gold", "rewrite"}:
+    if kind not in {
+        "last_turn",
+        "last_turn_all",
+        "gold",
+        "rewrite",
+        "agentic",
+    }:
         raise ValueError(f"{label}.kind is unknown: {kind}")
-    if kind != "rewrite":
-        return QueryConfig(name, kind, None, None, None)
+    if kind not in {"rewrite", "agentic"}:
+        return QueryConfig(name, kind, None, None, None, None, None)
 
     prompt = _prompt(section, label, project_root)
+    answer_prompt = (
+        _prompt(section, label, project_root, field="answer_prompt")
+        if kind == "agentic"
+        else None
+    )
+    compose_prompt = (
+        _prompt(section, label, project_root, field="compose_prompt")
+        if kind == "agentic"
+        else None
+    )
     temperature = _temperature(section.get("temperature", 0.0), label)
     max_tokens = int(section.get("max_tokens", 128))
     if max_tokens <= 0:
@@ -418,6 +436,8 @@ def _query_config(
         name=name,
         kind=kind,
         prompt=prompt,
+        answer_prompt=answer_prompt,
+        compose_prompt=compose_prompt,
         temperature=temperature,
         max_tokens=max_tokens,
     )
@@ -490,8 +510,14 @@ def _schedule_config(name: str, section: Mapping[str, Any]) -> ScheduleConfig:
     )
 
 
-def _prompt(section: Mapping[str, Any], label: str, project_root: Path) -> Path:
-    path = _path(_required_string(section, "prompt", label), project_root)
+def _prompt(
+    section: Mapping[str, Any],
+    label: str,
+    project_root: Path,
+    *,
+    field: str = "prompt",
+) -> Path:
+    path = _path(_required_string(section, field, label), project_root)
     if not path.is_file():
         raise ValueError(f"prompt file is missing: {path}")
     return path

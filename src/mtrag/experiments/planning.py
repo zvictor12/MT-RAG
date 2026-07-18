@@ -9,7 +9,16 @@ from typing import Any
 from mtrag.data.benchmark import DOMAINS
 from mtrag.experiments.fingerprint import file_sha256, fingerprint
 from mtrag.experiments.spec import ExperimentConfig
+from mtrag.llm.history_agent import AGENT_PROTOCOL_VERSION
+from mtrag.llm.prompts import (
+    GROUNDED_COMPOSITION_VERSION,
+    HISTORY_ANSWER_VERSION,
+    HISTORY_QUESTION_VERSION,
+)
 from mtrag.runtime import ResourceRequest, StageSpec
+
+
+ALL_TASK_LAST_QUERY_VERSION = "generation-final-user-v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,23 +74,40 @@ class _Builder:
             "kind": query.kind,
             "sources": _query_sources(self.config, query.kind),
         }
-        if query.kind == "rewrite":
+        if query.kind == "last_turn_all":
+            inputs["semantics"] = ALL_TASK_LAST_QUERY_VERSION
+        if query.kind in {"rewrite", "agentic"}:
             inputs.update(
                 {
                     "prompt_sha256": file_sha256(query.prompt),
                     "temperature": query.temperature,
                     "max_tokens": query.max_tokens,
                     **_ollama_identity(self.config),
-                    "semantics": "ollama-rewrite-v1",
+                    "semantics": (
+                        AGENT_PROTOCOL_VERSION
+                        if query.kind == "agentic"
+                        else "ollama-rewrite-v1"
+                    ),
                 }
             )
+            if query.kind == "agentic":
+                inputs["answer_prompt_sha256"] = file_sha256(
+                    query.answer_prompt
+                )
+                inputs["compose_prompt_sha256"] = file_sha256(
+                    query.compose_prompt
+                )
+                inputs["question_semantics"] = HISTORY_QUESTION_VERSION
+                inputs["answer_semantics"] = HISTORY_ANSWER_VERSION
+                inputs["composition_semantics"] = GROUNDED_COMPOSITION_VERSION
         revision = fingerprint("query", inputs)
-        if query.kind == "rewrite":
+        if query.kind in {"rewrite", "agentic"}:
             product = self._add(
                 "rewrite",
                 name,
                 revision,
                 gpu=True,
+                max_attempts=2,
                 query_name=name,
                 query_revision=revision,
             )
@@ -284,6 +310,7 @@ class _Builder:
             revision,
             dependencies=_after(context),
             gpu=True,
+            max_attempts=2,
             **params,
         )
         self.generations[job_name] = product
@@ -437,7 +464,7 @@ def _generation_tasks(config: ExperimentConfig) -> Path:
 
 def _query_sources(config: ExperimentConfig, kind: str) -> dict[str, str]:
     root = config.run.benchmark_root
-    if kind == "rewrite":
+    if kind in {"last_turn_all", "rewrite", "agentic"}:
         return _file_digests(root, ["mtrag-human/generation_tasks/reference.jsonl"])
     suffix = "lastturn" if kind == "last_turn" else "rewrite"
     paths = [

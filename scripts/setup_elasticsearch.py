@@ -6,10 +6,7 @@ import requests
 from mtrag.config import settings
 
 
-SNAPSHOT_REPOSITORY = "mtrag-repository"
-SNAPSHOT_NAME = "mtrag-elser"
-SNAPSHOT_LOCATION = "/snapshots/elser"
-SNAPSHOT_DIR = (
+SNAPSHOT_ROOT = (
     Path(__file__).resolve().parents[1]
     / "artifacts"
     / "elasticsearch"
@@ -51,7 +48,17 @@ def wait_for_elasticsearch() -> None:
 
 
 def start_trial() -> None:
-    result = es_request(
+    license_info = es_request("GET", "/_license")["license"]
+    license_type = license_info["type"]
+    if license_info["status"] == "active" and license_type in {
+        "trial",
+        "platinum",
+        "enterprise",
+    }:
+        print("license:", license_type)
+        return
+
+    es_request(
         "POST",
         "/_license/start_trial",
         params={"acknowledge": "true"},
@@ -67,55 +74,53 @@ def start_trial() -> None:
     print("license:", license_type)
 
 
-def validate_snapshot_files() -> None:
-    if not (SNAPSHOT_DIR / "indices").is_dir():
-        raise RuntimeError(
-            f"ELSER snapshot is missing in {SNAPSHOT_DIR}. "
-            "Extract mtrag_elser_snapshot.zip there first."
-        )
-    if not any(
-        path.name != "index.latest" for path in SNAPSHOT_DIR.glob("index-*")
-    ):
-        raise RuntimeError(f"No Elasticsearch repository index found in {SNAPSHOT_DIR}")
-
-
-def register_snapshot_repository() -> None:
-    es_request(
-        "PUT",
-        f"/_snapshot/{SNAPSHOT_REPOSITORY}",
-        {
-            "type": "fs",
-            "settings": {"location": SNAPSHOT_LOCATION, "readonly": True},
-        },
+def validate_snapshot_files(domain: str) -> None:
+    directory = SNAPSHOT_ROOT / domain
+    has_index = any(
+        path.name != "index.latest" for path in directory.glob("index-*")
     )
-    es_request("GET", f"/_snapshot/{SNAPSHOT_REPOSITORY}/{SNAPSHOT_NAME}")
-    print("ELSER snapshot: verified")
+    if not (directory / "indices").is_dir() or not has_index:
+        archive = f"mtrag_elser_{domain}.zip"
+        raise RuntimeError(f"Extract {archive} into {directory}")
 
 
 def create_elser_endpoint() -> None:
     path = f"/_inference/sparse_embedding/{settings.elser_inference_id}"
-    if requests.get(settings.elasticsearch_url + path, timeout=10).ok:
-        print("ELSER endpoint: already exists")
-    else:
-        es_request(
-            "PUT",
-            path,
-            {
-                "service": "elasticsearch",
-                "service_settings": {
-                    "model_id": MODEL_ID,
-                    "num_threads": 2,
-                    "adaptive_allocations": {
-                        "enabled": True,
-                        "min_number_of_allocations": 1,
-                        "max_number_of_allocations": 1,
-                    },
-                },
-                "chunking_settings": {"strategy": "none"},
-            },
-            timeout=31 * 60,
-            params={"timeout": "30m"},
+    endpoint_exists = requests.get(
+        settings.elasticsearch_url + path,
+        timeout=10,
+    ).ok
+    if endpoint_exists:
+        probe = requests.post(
+            settings.elasticsearch_url + path,
+            json={"input": "test query"},
+            timeout=120,
         )
+        if probe.ok:
+            print("ELSER endpoint: ready")
+            return
+        print("ELSER endpoint: restarting failed deployment")
+        es_request("DELETE", path, params={"force": "true"})
+
+    es_request(
+        "PUT",
+        path,
+        {
+            "service": "elasticsearch",
+            "service_settings": {
+                "model_id": MODEL_ID,
+                "num_threads": 2,
+                "adaptive_allocations": {
+                    "enabled": True,
+                    "min_number_of_allocations": 1,
+                    "max_number_of_allocations": 1,
+                },
+            },
+            "chunking_settings": {"strategy": "none"},
+        },
+        timeout=31 * 60,
+        params={"timeout": "30m"},
+    )
 
     last_error = ""
     for _ in range(120):
@@ -132,40 +137,51 @@ def create_elser_endpoint() -> None:
     raise RuntimeError(f"ELSER model did not become ready: {last_error}")
 
 
-def restore_snapshot() -> None:
-    indices = [f"mtrag-{domain}-elser" for domain in DOMAINS]
-    missing = [
-        index
-        for index in indices
-        if not requests.head(f"{settings.elasticsearch_url}/{index}", timeout=10).ok
-    ]
-    if not missing:
-        print("indices: already restored")
+def restore_snapshot(domain: str) -> None:
+    index = f"mtrag-{domain}-elser"
+    count_response = requests.get(
+        f"{settings.elasticsearch_url}/{index}/_count",
+        timeout=10,
+    )
+    if count_response.ok:
+        count = count_response.json()["count"]
+        print(index, "already restored:", count)
         return
+    if requests.head(f"{settings.elasticsearch_url}/{index}", timeout=10).ok:
+        es_request("DELETE", f"/{index}")
+
+    repository = f"mtrag-elser-{domain}-repository"
+    snapshot = f"mtrag-elser-{domain}"
+    location = f"/snapshots/elser/{domain}"
 
     es_request(
-        "POST",
-        f"/_snapshot/{SNAPSHOT_REPOSITORY}/{SNAPSHOT_NAME}/_restore",
+        "PUT",
+        f"/_snapshot/{repository}",
         {
-            "indices": ",".join(missing),
-            "include_global_state": False,
+            "type": "fs",
+            "settings": {"location": location, "readonly": True},
         },
+    )
+    es_request("GET", f"/_snapshot/{repository}/{snapshot}")
+    es_request(
+        "POST",
+        f"/_snapshot/{repository}/{snapshot}/_restore",
+        {"indices": index, "include_global_state": False},
         timeout=60 * 60,
         params={"wait_for_completion": "true"},
     )
-
-    for index in indices:
-        count = es_request("GET", f"/{index}/_count")["count"]
-        print(index, count)
+    es_request("DELETE", f"/_snapshot/{repository}")
+    print(index, "restored:", es_request("GET", f"/{index}/_count")["count"])
 
 
 def main() -> None:
-    validate_snapshot_files()
+    for domain in DOMAINS:
+        validate_snapshot_files(domain)
     wait_for_elasticsearch()
-    register_snapshot_repository()
     start_trial()
     create_elser_endpoint()
-    restore_snapshot()
+    for domain in DOMAINS:
+        restore_snapshot(domain)
 
 
 if __name__ == "__main__":

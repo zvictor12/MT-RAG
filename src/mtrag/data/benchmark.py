@@ -124,6 +124,18 @@ class BenchmarkRepository:
                 )
         return tuple(cases)
 
+    def all_task_last_query_cases(self) -> tuple[QueryCase, ...]:
+        """Build last-turn queries for every generation task, including no-qrel turns."""
+        return tuple(
+            QueryCase(
+                task_id=task.task_id,
+                domain=task.domain,
+                variant=QueryVariant.LAST,
+                text=clean_query_text(_final_user_question(task)),
+            )
+            for task in self.load_tasks()
+        )
+
     def _qwen_query_cases(
         self,
         source: Mapping[str, str] | str | PathLike[str],
@@ -203,6 +215,14 @@ def _parse_message(row: Mapping[str, Any]) -> Message:
     return Message(
         speaker=_required_str(row, "speaker"),
         text=_required_str(row, "text"),
+    )
+
+
+def _final_user_question(task: BenchmarkTask) -> str:
+    return next(
+        message.text
+        for message in reversed(task.messages)
+        if message.speaker == "user"
     )
 
 

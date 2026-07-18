@@ -4,6 +4,15 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
+.codex/
+/report.md
+
+# Local diagnostics and manual smoke-test helpers.
+scripts/check_services.py
+scripts/diagnose_env.py
+scripts/import_legacy_run.py
+scripts/smoke_*.py
+scripts/verify_experiment_cleanup.py
 
 # Elasticsearch repositories contain large runtime artifacts.
 artifacts/elasticsearch/archives/**

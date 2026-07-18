@@ -8,6 +8,9 @@ from mtrag.schemas import BenchmarkTask, Context, Message
 
 
 REWRITE_PROMPT_VERSION = "qwen-rewrite-v2"
+HISTORY_QUESTION_VERSION = "history-question-v2"
+HISTORY_ANSWER_VERSION = "history-answer-v2"
+GROUNDED_COMPOSITION_VERSION = "grounded-query-composition-v3"
 GENERATOR_PROMPT_VERSION = "qwen-grounded-generation-v1"
 
 
@@ -53,6 +56,68 @@ def build_rewrite_messages(
     ]
 
 
+def build_history_question_messages(
+    task: BenchmarkTask,
+    *,
+    prompt: PromptTemplate,
+) -> list[dict[str, str]]:
+    _history, question = _history_and_question(task.messages)
+    return [
+        {"role": "system", "content": prompt.text},
+        {
+            "role": "user",
+            "content": json.dumps(
+                {"current_question": question},
+                ensure_ascii=False,
+                indent=2,
+            ),
+        },
+    ]
+
+
+def build_history_answer_messages(
+    task: BenchmarkTask,
+    questions: Sequence[str],
+    *,
+    prompt: PromptTemplate,
+) -> list[dict[str, str]]:
+    history, _question = _history_and_question(task.messages)
+    request = {
+        "history": numbered_history(history),
+        "questions": [
+            {"id": f"Q{index}", "text": question}
+            for index, question in enumerate(questions, start=1)
+        ],
+    }
+    return [
+        {"role": "system", "content": prompt.text},
+        {
+            "role": "user",
+            "content": json.dumps(request, ensure_ascii=False, indent=2),
+        },
+    ]
+
+
+def build_grounded_rewrite_messages(
+    task: BenchmarkTask,
+    dependencies: Sequence[dict[str, str]],
+    *,
+    prompt: PromptTemplate,
+) -> list[dict[str, str]]:
+    _history, question = _history_and_question(task.messages)
+    request = {
+        "current_question": question,
+        "resolved_dependencies": list(dependencies),
+    }
+    return [
+        {"role": "system", "content": prompt.text},
+        {
+            "role": "user",
+            "content": json.dumps(request, ensure_ascii=False, indent=2),
+        },
+    ]
+
+
 def build_generator_messages(
     task: BenchmarkTask,
     contexts: Sequence[Context],
@@ -86,6 +151,23 @@ def _history_and_question(
 def _message_record(message: Message) -> dict[str, str]:
     speaker = "assistant" if message.speaker == "agent" else message.speaker
     return {"speaker": speaker, "text": message.text}
+
+
+def numbered_history(messages: Sequence[Message]) -> list[dict[str, str]]:
+    counts = {"user": 0, "assistant": 0}
+    records = []
+    for message in messages:
+        speaker = "assistant" if message.speaker == "agent" else message.speaker
+        counts[speaker] += 1
+        prefix = "U" if speaker == "user" else "A"
+        records.append(
+            {
+                "id": f"{prefix}{counts[speaker]}",
+                "speaker": speaker,
+                "text": message.text,
+            }
+        )
+    return records
 
 
 def _context_record(context: Context) -> dict[str, str]:

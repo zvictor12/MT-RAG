@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from mtrag.llm.generator import AnswerGenerator
+from mtrag.llm.ollama_client import OllamaClient
 from mtrag.llm.prompts import PromptTemplate
 from mtrag.llm.rewriter import QueryRewriter
 from mtrag.runtime.cache import SqliteCache
@@ -40,6 +41,11 @@ def task() -> BenchmarkTask:
 
 
 class LlmServicesTest(unittest.TestCase):
+    def test_ollama_retries_internal_server_errors(self) -> None:
+        retries = OllamaClient().session.get_adapter("http://").max_retries
+
+        self.assertIn(500, retries.status_forcelist)
+
     def test_rewrite_and_generation_are_cached(self) -> None:
         client = FakeClient()
         with tempfile.TemporaryDirectory() as directory:

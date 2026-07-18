@@ -2,8 +2,10 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from mtrag.experiments.preflight import (
+    _check_elser_endpoint,
     _require_files,
     _validate_bge_mapping,
     requirements_for,
@@ -11,6 +13,23 @@ from mtrag.experiments.preflight import (
 
 
 class ExperimentPreflightTest(unittest.TestCase):
+    @patch("mtrag.experiments.preflight.requests.post")
+    def test_elser_endpoint_must_run_inference(self, post: Mock) -> None:
+        post.return_value.ok = False
+        config = SimpleNamespace(
+            services=SimpleNamespace(
+                elasticsearch_url="http://localhost:9200",
+                elser_inference_id="mtrag-elser",
+            )
+        )
+
+        self.assertFalse(_check_elser_endpoint(config))
+        post.assert_called_once_with(
+            "http://localhost:9200/_inference/sparse_embedding/mtrag-elser",
+            json={"input": "preflight query"},
+            timeout=120,
+        )
+
     def test_requires_every_pinned_model_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

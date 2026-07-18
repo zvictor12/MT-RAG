@@ -6,11 +6,10 @@ BGE_REVISION := 5617a9f61b028005a4858fdac845db406aefb181
 RERANKER_REVISION := 953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e
 EXPERIMENT_CONFIG ?= configs/experiment.toml
 EXPERIMENT_SCHEDULE ?= bge
-LEGACY_IMPORT_FLAGS ?=
 RUN_DIR ?=
 RUN_DIR_ARG = $(if $(strip $(RUN_DIR)),--run-dir "$(RUN_DIR)",)
 
-.PHONY: sync sync-ml sync-evaluation sync-experiment diagnose infra-check es-up es-down es-logs es-setup elser-setup bge-restore models-bge models-reranker models smoke-bge smoke-reranker smoke-models ollama-enable ollama-pull ollama-smoke smoke-prompts ollama-unload smoke-search experiment-import-legacy experiment-plan experiment-preflight experiment-run experiment-status experiment-results test
+.PHONY: sync sync-ml sync-evaluation sync-experiment es-up es-down es-logs es-setup elser-setup bge-restore models-bge models-reranker models ollama-enable ollama-pull ollama-unload experiment-plan experiment-preflight experiment-run experiment-status experiment-results test
 
 sync:
 	uv sync
@@ -23,12 +22,6 @@ sync-evaluation:
 
 sync-experiment:
 	uv sync --extra ml --extra evaluation
-
-diagnose:
-	uv run python scripts/diagnose_env.py
-
-infra-check:
-	uv run python scripts/check_services.py
 
 es-up:
 	docker compose up -d elasticsearch
@@ -55,34 +48,14 @@ models-reranker:
 
 models: models-bge models-reranker
 
-smoke-bge:
-	uv run --extra ml python scripts/smoke_bge.py
-
-smoke-reranker:
-	uv run --extra ml python scripts/smoke_reranker.py
-
-smoke-models: smoke-bge smoke-reranker
-
 ollama-enable:
 	sudo systemctl enable --now ollama
 
 ollama-pull:
 	ollama pull $(OLLAMA_MODEL)
 
-ollama-smoke:
-	uv run python scripts/smoke_ollama.py
-
-smoke-prompts:
-	uv run python scripts/smoke_prompts.py
-
 ollama-unload:
 	ollama stop $(OLLAMA_MODEL)
-
-smoke-search:
-	uv run python scripts/smoke_search.py "What is cloud computing?"
-
-experiment-import-legacy:
-	uv run --extra ml python scripts/import_legacy_run.py --schedule "$(EXPERIMENT_SCHEDULE)" --config "$(EXPERIMENT_CONFIG)" $(RUN_DIR_ARG) $(LEGACY_IMPORT_FLAGS)
 
 experiment-plan:
 	uv run --extra ml --extra evaluation python scripts/run_experiment.py plan --schedule "$(EXPERIMENT_SCHEDULE)" --config "$(EXPERIMENT_CONFIG)" $(RUN_DIR_ARG)
